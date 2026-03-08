@@ -1,0 +1,43 @@
+# Stage 1: Build the worker Go binary
+FROM golang:1.22-alpine AS builder
+RUN apk add --no-cache git
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /worker ./cmd/worker
+
+# Stage 2: Pull binaries from official Docker images
+FROM projectdiscovery/subfinder:latest AS subfinder
+FROM projectdiscovery/naabu:latest AS naabu
+FROM projectdiscovery/httpx:latest AS httpx
+FROM projectdiscovery/katana:latest AS katana
+FROM projectdiscovery/nuclei:latest AS nuclei
+
+# Stage 3: Final runtime image
+FROM alpine:3.19
+
+RUN apk add --no-cache \
+    ca-certificates \
+    libpcap \
+    chromium \
+    bind-tools \
+    bash
+
+# Copy binaries from official ProjectDiscovery images
+COPY --from=subfinder /usr/local/bin/subfinder /usr/local/bin/subfinder
+COPY --from=naabu     /usr/local/bin/naabu     /usr/local/bin/naabu
+COPY --from=httpx     /usr/local/bin/httpx     /usr/local/bin/httpx
+COPY --from=katana    /usr/local/bin/katana    /usr/local/bin/katana
+COPY --from=nuclei    /usr/local/bin/nuclei    /usr/local/bin/nuclei
+
+# Download nuclei templates at build time so they're baked into the image.
+# The volume mount in docker-compose allows runtime updates without rebuilding.
+ENV HOME=/root
+RUN nuclei -update-templates
+
+# Copy worker binary and config
+COPY --from=builder /worker /usr/local/bin/worker
+COPY configs/config.yaml /etc/bugscanner/config.yaml
+
+ENTRYPOINT ["worker"]

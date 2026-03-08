@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go mod init github.com/brandon/bugscanner)",
+      "Bash(brew list go)",
+      "Bash(go build ./...)",
+      "Bash(make down)",
+      "Bash(make up)",
+      "Bash(docker exec deployments-worker-1 curl -s -m 10 -o /dev/null -w \"%{http_code} %{time_total}s\" http://testphp.vulnweb.com/)",
+      "Bash(docker exec deployments-worker-1 wget -q -O - --timeout=10 http://testphp.vulnweb.com/)",
+      "Bash(docker exec deployments-worker-1 httpx -u http://testphp.vulnweb.com -json -silent)",
+      "Bash(docker exec deployments-worker-1 httpx -help)",
+      "Bash(docker exec deployments-worker-1 ls -la /tmp/)",
+      "Bash(docker exec deployments-worker-1 httpx -version)",
+      "Bash(docker exec deployments-worker-1 env)",
+      "Bash(docker exec deployments-worker-1 sh -c 'echo \"\"http://testphp.vulnweb.com\"\" > /tmp/httpx-test.txt && httpx -list /tmp/httpx-test.txt -json -status-code -title -tech-detect -content-length -content-type -cdn -response-time -follow-redirects -silent 2>/dev/null | wc -c')",
+      "Bash(docker exec deployments-worker-1 sh -c 'echo \"\"http://testphp.vulnweb.com\"\" > /tmp/httpx-test.txt && httpx -list /tmp/httpx-test.txt -json -status-code -title -tech-detect -content-length -content-type -cdn -response-time -follow-redirects 2>/dev/null | wc -c')",
+      "Bash(docker exec deployments-worker-1 sh -c 'echo $TMPDIR; ls /tmp/')",
+      "Bash(docker exec deployments-worker-1 sh -c 'echo \"\"http://testphp.vulnweb.com\"\" > /tmp/httpx-test.txt && httpx -list /tmp/httpx-test.txt -json -status-code -title -tech-detect -content-length -content-type -cdn -response-time -follow-redirects -silent > /tmp/httpx-output.txt 2>/tmp/httpx-stderr.txt; echo \"\"exit=$?\"\"; echo \"\"stdout_bytes=$\\(wc -c < /tmp/httpx-output.txt\\)\"\"; echo \"\"stderr_bytes=$\\(wc -c < /tmp/httpx-stderr.txt\\)\"\"; cat /tmp/httpx-output.txt')",
+      "Bash(docker exec deployments-worker-1 sh -c 'echo \"\"http://testphp.vulnweb.com\"\" > /tmp/httpx-test.txt && httpx -list /tmp/httpx-test.txt -json -status-code -title -tech-detect -content-length -content-type -cdn -response-time -follow-redirects -silent < /dev/null > /tmp/httpx-output2.txt 2>/dev/null; echo \"\"exit=$?\"\"; wc -c < /tmp/httpx-output2.txt')",
+      "Bash(docker exec -w / deployments-worker-1 sh -c 'echo \"\"http://testphp.vulnweb.com\"\" > /tmp/httpx-test.txt && httpx -list /tmp/httpx-test.txt -json -status-code -title -tech-detect -content-length -content-type -cdn -response-time -follow-redirects -silent < /dev/null > /tmp/httpx-output3.txt 2>/dev/null; wc -c < /tmp/httpx-output3.txt')",
+      "Bash(docker exec deployments-worker-2 sh -c 'echo \"\"http://testphp.vulnweb.com\"\" > /tmp/httpx-test.txt && httpx -list /tmp/httpx-test.txt -json -status-code -title -tech-detect -content-length -content-type -cdn -response-time -follow-redirects -silent < /dev/null > /tmp/httpx-out.txt 2>/dev/null; echo \"\"exit=$?\"\"; wc -c < /tmp/httpx-out.txt')",
+      "Bash(docker exec deployments-worker-1 sh -c 'echo \"\"http://testphp.vulnweb.com\"\" | httpx -list /dev/stdin -json -status-code -title -tech-detect -content-length -content-type -cdn -response-time -follow-redirects -silent > /tmp/httpx-stdin-out.txt 2>/dev/null; echo \"\"exit=$?\"\"; wc -c < /tmp/httpx-stdin-out.txt')"
+    ]
+  }
+}

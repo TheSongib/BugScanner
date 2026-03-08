@@ -1,0 +1,43 @@
+server:
+  port: 8080
+  host: "0.0.0.0"
+
+database:
+  url: "postgres://scanner:changeme@localhost:5432/bugscanner?sslmode=disable"
+  migrations_path: "/etc/bugscanner/migrations"
+  max_conns: 20
+
+rabbitmq:
+  url: "amqp://scanner:changeme@localhost:5672/"
+
+redis:
+  url: "redis://localhost:6379/0"
+
+worker:
+  concurrency: 3
+
+rate_limit:
+  global: 100        # max requests per second globally
+  per_target: 30     # max rps per target domain
+  per_tool:
+    subfinder: 50
+    amass: 20
+    shuffledns: 100
+    naabu: 200
+    httpx: 100
+    katana: 50
+    nuclei: 50
+
+notify:
+  discord_webhook_url: ""   # Set via DISCORD_WEBHOOK_URL env var
+  slack_webhook_url: ""     # Set via SLACK_WEBHOOK_URL env var
+  min_severity: "medium"    # Only notify for medium+ findings
+
+tools:
+  subfinder: "subfinder"
+  amass: "amass"
+  shuffledns: "shuffledns"
+  naabu: "naabu"
+  httpx: "httpx"
+  katana: "katana"
+  nuclei: "nuclei"

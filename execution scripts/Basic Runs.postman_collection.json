@@ -1,0 +1,151 @@
+{
+	"info": {
+		"_postman_id": "2db1b753-1018-4cfd-803e-9370f44995c0",
+		"name": "Basic runs",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "40649640"
+	},
+	"item": [
+		{
+			"name": "Create Scan",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"const response = pm.response.json();",
+							"pm.collectionVariables.set(\"scan_id\", response.scan.id);"
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"protocolProfileBehavior": {
+				"disabledSystemHeaders": {}
+			},
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"target\": \"hackerone.com\",\n    \"scope_in\": [\"^([a-z0-9-]+\\\\.)?hackerone\\\\.com$\"]\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:8080/api/v1/scans",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"api",
+						"v1",
+						"scans"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Scan Status",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8080/api/v1/scans/{{scan_id}}",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"api",
+						"v1",
+						"scans",
+						"{{scan_id}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get Results",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8080/api/v1/scans/{{scan_id}}/results",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"api",
+						"v1",
+						"scans",
+						"{{scan_id}}",
+						"results"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "List All Runs",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8080/api/v1/scans",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"api",
+						"v1",
+						"scans"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Cancel Run",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8080/api/v1/scans/{{scan_id}}/cancel",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"api",
+						"v1",
+						"scans",
+						"{{scan_id}}",
+						"cancel"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "scan_id",
+			"value": ""
+		}
+	]
+}

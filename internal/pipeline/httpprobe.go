@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
+	"time"
 
 	"github.com/brandon/bugscanner/internal/broker"
 	"github.com/brandon/bugscanner/internal/database"
@@ -31,25 +31,21 @@ func (s *HTTPProbeStage) Run(ctx context.Context, job broker.Job) (int, error) {
 		return 0, fmt.Errorf("unmarshal httpprobe payload: %w", err)
 	}
 
+	// Brief pause to allow any transient network state from naabu's port scan to settle.
+	// With the web-port-only scan (20 ports at 300/s), conntrack recovers instantly,
+	// but a small buffer guards against edge cases.
+	slog.Info("waiting before HTTP probing", "delay", "5s")
+	time.Sleep(5 * time.Second)
+
 	slog.Info("starting HTTP probing", "targets", len(payload.HostPorts), "target_list", payload.HostPorts, "scan_id", job.ScanID)
 
-	// Write targets to a temp file — httpx has known issues reading from
-	// /dev/stdin over a pipe in some versions. A temp file is more reliable.
-	tmpFile, err := os.CreateTemp("", "httpx-targets-*.txt")
-	if err != nil {
-		return 0, fmt.Errorf("create temp file: %w", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	targetList := strings.Join(payload.HostPorts, "\n")
-	if _, err := tmpFile.WriteString(targetList + "\n"); err != nil {
-		tmpFile.Close()
-		return 0, fmt.Errorf("write targets: %w", err)
-	}
-	tmpFile.Close()
+	// Use -u flag with comma-separated targets to avoid temp-file + stdin interaction issues.
+	targetArg := strings.Join(payload.HostPorts, ",")
+	slog.Info("httpx target arg", "targets", targetArg)
 
 	result, err := s.deps.Runner.Run(ctx, s.deps.Config.Tools.Httpx, []string{
-		"-list", tmpFile.Name(),
+		"-u", targetArg,
+		"-no-fallback-scheme", // use only the scheme from the input URL (don't auto-try https for http:// inputs)
 		"-json",
 		"-status-code",
 		"-title",
@@ -60,6 +56,8 @@ func (s *HTTPProbeStage) Run(ctx context.Context, job broker.Job) (int, error) {
 		"-response-time",
 		"-follow-redirects",
 		"-silent",
+		"-timeout", "10",
+		"-retries", "3", // retry up to 3x: naabu SYN scan briefly disrupts Docker conntrack (~10s to recover)
 	}, nil)
 	if err != nil {
 		return 0, fmt.Errorf("run httpx: %w", err)

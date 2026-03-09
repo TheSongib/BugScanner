@@ -103,6 +103,19 @@ curl http://localhost:8080/health
 # {"status":"ok"}
 ```
 
+### 6. Import the Postman collection (optional)
+
+A ready-to-use Postman collection is included at `execution scripts/Basic Runs.postman_collection.json`.
+
+Import it into Postman (**File → Import**) and you get:
+- **Create Scan** — fires a scan and automatically saves the returned `scan_id` as a collection variable
+- **Scan Status** — checks progress using `{{scan_id}}`
+- **Get Results** — fetches vulnerability findings using `{{scan_id}}`
+- **List All Runs** — lists all scans
+- **Cancel Run** — cancels the current `{{scan_id}}`
+
+Run **Create Scan** first — every subsequent request will automatically target that scan.
+
 ---
 
 ## Usage
@@ -436,3 +449,9 @@ brew install jq
 docker exec -it deployments-postgres-1 psql -U scanner -d bugscanner
 ```
 Then run standard SQL: `SELECT * FROM scans;`, `SELECT severity, count(*) FROM vulnerabilities GROUP BY severity;`
+
+**Scan terminates at port scan with 0 ports found:**
+The test server (`testphp.vulnweb.com`) or target may be temporarily unreachable. Wait a minute and retry.
+
+**Scan reaches httpx but finds 0 live services:**
+This is usually a transient network issue. The port scanner runs web-ports-only to avoid disrupting Docker's connection tracking. Retry the scan.

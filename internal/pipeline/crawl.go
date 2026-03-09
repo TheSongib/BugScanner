@@ -47,7 +47,7 @@ func (s *CrawlStage) Run(ctx context.Context, job broker.Job) (int, error) {
 
 	result, err := s.deps.Runner.Run(ctx, s.deps.Config.Tools.Katana, []string{
 		"-list", tmpFile.Name(),
-		"-json",
+		"-jsonl",
 		"-depth", "3",
 		"-js-crawl",
 		"-known-files", "all",

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/brandon/bugscanner/internal/ratelimit"
@@ -54,6 +55,9 @@ func (r *Runner) Run(ctx context.Context, toolName string, args []string, stdin 
 	start := time.Now()
 
 	cmd := exec.CommandContext(ctx, toolName, args...)
+	// Create a new session so subprocesses don't inherit the worker's process group,
+	// which can cause network/signal behavior differences vs docker exec.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -84,14 +88,13 @@ func (r *Runner) Run(ctx context.Context, toolName string, args []string, stdin 
 		"stderr_len", len(result.Stderr),
 	)
 
-	// Log stderr and diagnostics when a tool produces no stdout —
-	// helps diagnose why a pipeline stage found nothing.
-	if len(result.Stdout) == 0 && len(result.Stderr) > 0 {
+	// Always log stderr if present — helps diagnose tool failures.
+	if len(result.Stderr) > 0 {
 		stderrStr := string(result.Stderr)
-		if len(stderrStr) > 1000 {
-			stderrStr = stderrStr[:1000] + "...(truncated)"
+		if len(stderrStr) > 2000 {
+			stderrStr = stderrStr[:2000] + "...(truncated)"
 		}
-		slog.Warn("tool produced no output", "tool", toolName, "stderr", stderrStr)
+		slog.Info("tool stderr", "tool", toolName, "stderr", stderrStr)
 	}
 
 	if err != nil {

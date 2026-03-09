@@ -34,11 +34,14 @@ func (s *PortScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 	// Create a temp input for naabu (pass targets via stdin)
 	targetList := strings.Join(payload.Targets, "\n")
 
+	// Scan only common web ports to minimise conntrack table pressure in Docker.
+	// Top-1000 creates ~1000 conntrack entries that take ~60s to expire and break
+	// subsequent httpx probes. Web-focused port list covers all practical HTTP targets.
 	result, err := s.deps.Runner.Run(ctx, s.deps.Config.Tools.Naabu, []string{
 		"-list", "/dev/stdin",
 		"-json",
-		"-top-ports", "1000",
-		"-rate", "1000",
+		"-p", "80,443,8080,8443,8000,8888,3000,5000,4000,9000,9090,9443,4443,8008,8181,8800,7080,7443,6443,3001",
+		"-rate", "300",
 		"-silent",
 	}, strings.NewReader(targetList))
 	if err != nil {

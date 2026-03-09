@@ -53,7 +53,7 @@ func (s *VulnScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 	// since tag filtering excludes many important vulnerability checks.
 	args := []string{
 		"-list", tmpFile.Name(),
-		"-json",
+		"-jsonl",
 		"-severity", "info,low,medium,high,critical",
 		"-silent",
 		"-rate-limit", "50",
@@ -64,6 +64,14 @@ func (s *VulnScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 	result, err := s.deps.Runner.RunWithTimeout(ctx, s.deps.Config.Tools.Nuclei, args, nil, 30*time.Minute)
 	if err != nil {
 		return 0, fmt.Errorf("run nuclei: %w", err)
+	}
+
+	if len(result.Stdout) > 0 {
+		raw := string(result.Stdout)
+		if len(raw) > 2000 {
+			raw = raw[:2000] + "...(truncated)"
+		}
+		slog.Info("nuclei raw output", "bytes", len(result.Stdout), "output", raw)
 	}
 
 	findings, err := parser.ParseNuclei(result.Stdout)

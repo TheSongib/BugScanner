@@ -44,7 +44,8 @@ Workers consume all 5 queues simultaneously. Each stage publishes results to the
 - **Discovery:** Always includes the target domain itself as a scan target (not just subdomains). Marks scan complete if 0 targets found.
 - **Portscan:** Formats targets as full URLs for httpx (`http://host` for port 80, `https://host` for 443, both schemes for non-standard ports). Marks scan complete if 0 ports found.
 - **HTTPProbe:** Marks scan complete if 0 live services found.
-- **All stages (httpprobe, crawl, vulnscan):** Write targets to **temp files** and pass via `-list <tmpfile>` instead of `/dev/stdin`. httpx had issues reading from piped stdin in Docker containers. httpx also uses `-probe` flag for newer version compatibility.
+- **HTTPProbe:** Uses `-u <comma-separated-urls>` (inline targets, no temp file, no stdin). Waits 5s before running to let any transient network state from naabu settle. Also uses `-no-fallback-scheme` to avoid double-probing http+https.
+- **Crawl/VulnScan:** Write targets to temp files via `os.CreateTemp()` and pass with `-list <tmpfile>`.
 
 ### Dead-end handling
 Every pipeline stage that could produce 0 results has an else branch that calls `UpdateStatus(completed)` so scans don't hang forever: discovery, portscan, httpprobe.
@@ -67,8 +68,9 @@ Logs use **US Eastern time** with automatic DST handling (`America/New_York`).
 - Both `cmd/orchestrator/main.go` and `cmd/worker/main.go` call `logging.Setup()`.
 
 ### Diagnostic logging
-- `internal/runner/runner.go` logs stderr content when a tool produces empty stdout (helps diagnose why a stage found nothing).
-- `internal/pipeline/httpprobe.go` logs the full `target_list` it receives.
+- `internal/runner/runner.go` logs stderr content whenever it's non-empty (always, not just on empty stdout).
+- `internal/pipeline/httpprobe.go` logs full `target_list` and raw httpx stdout (truncated at 2000 chars).
+- `internal/pipeline/vulnscan.go` logs raw nuclei stdout (truncated at 2000 chars).
 
 ---
 
@@ -123,25 +125,15 @@ FROM projectdiscovery/nuclei:latest AS nuclei
 
 ---
 
-## Current Status / Active Issue (Session 2)
+## Current Status (Session 3 — RESOLVED)
 
-### httpx returning 0 results — STILL UNDER INVESTIGATION
-**Symptom:** httpx runs for ~25 seconds on `testphp.vulnweb.com` and produces `stdout_len:0, stderr_len:0`. The pipeline dies at the httpprobe stage.
-
-**What we've tried so far:**
-1. ~~Changed target format from `host:port` to `http://host`~~ — did not fix it
-2. ~~Switched from stdin pipe to temp file for input~~ — did not fix it (needs testing after rebuild)
-3. Added `-probe` flag to httpx args
-
-**What's confirmed working:**
-- Discovery stage: finds 0 subdomains but correctly includes the target domain itself (targets:1)
-- Portscan stage: naabu finds port 80 open (`stdout_len:270`)
-- The temp file + `-probe` changes have been built but need a fresh `make down && make up` to test
-
-**Possible remaining causes:**
-- httpx binary from ProjectDiscovery Docker image may have incompatible flags or need different args
-- Docker container may have outbound HTTP connectivity issues (naabu uses SYN scanning which is lower-level)
-- May need to test by exec'ing into the container: `docker exec -it deployments-worker-1 httpx -u http://testphp.vulnweb.com`
+### Pipeline is fully working end-to-end ✓
+Confirmed working scan against `testphp.vulnweb.com` (scan `11d8be92`):
+- Discovery: subfinder runs, 0 subdomains, target domain included
+- Portscan: naabu finds port 80
+- HTTPProbe: httpx finds `live_services:1` (Home of Acunetix Art, PHP 5.6.40)
+- Crawl: katana discovers **83 URLs**
+- VulnScan: nuclei finds **10 findings** stored in DB (info-severity: nginx-eol, php-eol, idea-folder-exposure, etc.)
 
 ### Recommended test target
 ```bash
@@ -152,7 +144,7 @@ curl -X POST http://localhost:8080/api/v1/scans \
     "scope_in": ["^([a-z0-9-]+\\.)?vulnweb\\.com$"]
   }'
 ```
-This is Acunetix's deliberately vulnerable test site with known XSS, SQLi, and misconfigurations.
+This is Acunetix's deliberately vulnerable test site. Expect ~5 min scan time.
 
 ---
 
@@ -166,6 +158,26 @@ Portscan now formats targets as `http://host` or `https://host` (not bare `host:
 
 ### Exit code 2 = no results (not an error)
 ProjectDiscovery tools return exit code 2 when they run successfully but find nothing. The runner handles this correctly.
+
+### Nuclei/katana use `-jsonl` not `-json`
+The ProjectDiscovery tools in the Docker images use `-jsonl` (or `-j`) for JSONL output. Using `-json` prints "flag provided but not defined: -json" to stdout (37 bytes) and exits without scanning.
+
+### naabu port scan scope: web ports only
+Naabu is configured to scan only 20 common web ports (`-p "80,443,8080,8443,..."`) at rate 300/s.
+- Scanning top-1000 ports at rate 1000/s was filling Docker's conntrack table, blocking all HTTP connections for ~60s after the scan.
+- With 20 ports, no conntrack disruption — httpx can connect immediately.
+
+### Setsid: true in runner.go (critical)
+`cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}` is set for ALL subprocesses in runner.go.
+Without this, tools (especially httpx) run in the parent's process session and exhibit different network behavior than `docker exec`. This was the root cause of httpx producing 0 output for weeks.
+
+### Nuclei 30-min timeout kills crawl-based scans
+The vulnscan stage has a 30-minute `RunWithTimeout`. When the crawl stage finds 83 URLs and passes them all to a second nuclei run, nuclei tries to scan 83 URLs × ~7000 templates. At 50 req/s this takes ~3 hours, so the timeout kills it (`exit_code:-1`, 0 stdout — nuclei was killed before flushing output). **Not fixed yet.** Options: increase timeout or reduce template scope for crawled URLs.
+
+The first nuclei run (1 URL from httpprobe) completes fine with findings. So scans still produce results.
+
+### testphp.vulnweb.com server intermittency
+The Acunetix test server at 44.228.249.3 (AWS) is sometimes unreachable (no port 80 response). This is an external issue, not a code issue. Scans that hit a down window will terminate at portscan (0 ports found). Retry the scan when the server is up.
 
 ### amass and shuffledns not installed
 Not in the Docker image. Discovery stage logs WARN and continues with subfinder only.
@@ -191,8 +203,16 @@ Not in the Docker image. Discovery stage logs WARN and continues with subfinder 
 12. Nuclei timeout too short — increased from 10 min to 30 min via `RunWithTimeout`
 13. DST timezone wrong — added `import _ "time/tzdata"` for Alpine containers
 14. Katana relative URLs — crawl stage filters out non-absolute URLs before passing to nuclei
-15. Stdin pipe issues — switched httpx/katana/nuclei to temp file input instead of `/dev/stdin`
+15. Stdin pipe issues — switched httpx to `-u` flag, katana/nuclei to temp file input
 16. httpx target format — portscan now formats as `http://host` not `host:port`
+
+### Session 3 (2026-03-09)
+17. **httpx 0 output via Go exec** — Root cause: `exec.CommandContext` inherits parent process group/session; subprocesses behave differently from `docker exec`. Fixed by adding `cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}` in `runner.go` to create a new session for every subprocess.
+18. **httpx `-probe` flag breaking JSON** — `-probe` flag outputs non-standard JSON with `failed:true` results. Removed.
+19. **httpx `-json` → works; `-no-fallback-scheme`** — Added to prevent double-probing http+https (cuts duration 25s→15s).
+20. **httpx 0 output after naabu portscan** — naabu's 1000-port connect scan at 1000/s fills Docker conntrack table; recovery takes ~60s. Fixed by scanning only 20 web-relevant ports at 300/s (`-p "80,443,8080,8443,..."`) — no conntrack disruption.
+21. **nuclei/katana `-json` flag doesn't exist** — These tool versions use `-jsonl` (not `-json`). "flag provided but not defined: -json" was the 37-byte stdout causing silent failures. Fixed by switching to `-jsonl`.
+22. **httpx parser** — Added `input` field as URL fallback, debug logging for skipped results, slog warning on JSON parse failures.
 
 ---
 
@@ -267,8 +287,21 @@ make scale-workers WORKERS=5
 
 ---
 
+## Postman Collection
+`execution scripts/Basic Runs.postman_collection.json` — import into Postman via File → Import.
+- **Create Scan**: fires a scan and auto-saves `scan_id` to a collection variable via test script
+- **Scan Status**: `GET /api/v1/scans/{{scan_id}}`
+- **Get Results**: `GET /api/v1/scans/{{scan_id}}/results`
+- **List All Runs**: `GET /api/v1/scans`
+- **Cancel Run**: `POST /api/v1/scans/{{scan_id}}/cancel`
+
+Run Create Scan first — all other requests use `{{scan_id}}` automatically.
+
+---
+
 ## File Structure (key files)
 ```
+execution scripts/           — Postman collection for manual testing (not part of Go source)
 cmd/orchestrator/main.go     — API server entry point
 cmd/worker/main.go           — Worker entry point
 internal/api/handlers.go     — REST endpoint handlers

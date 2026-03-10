@@ -167,10 +167,17 @@ func (r *ScanRepo) GetJobsByScanID(ctx context.Context, scanID string) ([]databa
 	var jobs []database.ScanJob
 	for rows.Next() {
 		var j database.ScanJob
-		if err := rows.Scan(&j.ID, &j.ScanID, &j.Stage, &j.Status, &j.WorkerID,
-			&j.InputCount, &j.OutputCount, &j.ErrorMessage,
+		var workerID, errorMessage *string
+		if err := rows.Scan(&j.ID, &j.ScanID, &j.Stage, &j.Status, &workerID,
+			&j.InputCount, &j.OutputCount, &errorMessage,
 			&j.StartedAt, &j.CompletedAt, &j.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan job row: %w", err)
+		}
+		if workerID != nil {
+			j.WorkerID = *workerID
+		}
+		if errorMessage != nil {
+			j.ErrorMessage = *errorMessage
 		}
 		jobs = append(jobs, j)
 	}

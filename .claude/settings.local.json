@@ -71,7 +71,31 @@
       "Bash(docker exec deployments-postgres-1 psql -U bugscanner -c \"\\\\l\")",
       "Bash(docker exec deployments-postgres-1 env)",
       "Bash(docker exec deployments-postgres-1 psql -U scanner -d bugscanner -c \"SELECT template_id, severity, matched_url FROM vulnerabilities WHERE scan_id=''11d8be92-7ccd-4c47-be86-be9b6793bbc7'' ORDER BY severity;\")",
-      "Bash(docker exec deployments-postgres-1 psql -U scanner -d bugscanner -c \"SELECT template_id, severity, matched_url FROM vulnerabilities WHERE scan_id=''11d8be92-7ccd-4c47-be86-be9b6793bbc7'' ORDER BY severity, template_id;\")"
+      "Bash(docker exec deployments-postgres-1 psql -U scanner -d bugscanner -c \"SELECT template_id, severity, matched_url FROM vulnerabilities WHERE scan_id=''11d8be92-7ccd-4c47-be86-be9b6793bbc7'' ORDER BY severity, template_id;\")",
+      "Bash(docker exec deployments-worker-1 nuclei -version)",
+      "Bash(docker exec deployments-worker-1 sh -c \"nuclei -list /dev/null -tl 2>&1 | head -20\")",
+      "Bash(docker exec deployments-worker-1 sh -c \"find /root/nuclei-templates -name ''*.yaml'' | grep -E ''\\(sqli|sql-injection|xss|lfi|rfi\\)'' | head -20\")",
+      "Bash(docker exec deployments-worker-1 sh -c \"nuclei -t /root/nuclei-templates/http/fuzzing/ -u http://testphp.vulnweb.com/listproducts.php?cat=1 -jsonl -severity info,low,medium,high,critical 2>&1 | head -30\")",
+      "Bash(docker exec deployments-worker-1 sh -c \"nuclei -t /root/nuclei-templates/dast/ -u http://testphp.vulnweb.com/listproducts.php?cat=1 -jsonl -severity info,low,medium,high,critical -dast 2>&1 | head -40\")",
+      "Bash(docker exec deployments-worker-1 sh -c \"nuclei -t /root/nuclei-templates/dast/vulnerabilities/sqli/ -u ''http://testphp.vulnweb.com/listproducts.php?cat=1'' -jsonl 2>&1\")",
+      "Bash(docker exec deployments-postgres-1 psql -U scanner -d bugscanner -c \"SELECT template_id, severity, COUNT\\(*\\) FROM vulnerabilities WHERE scan_id=''d7ce8feb-b5b2-4a48-851a-0d17330c6595'' GROUP BY template_id, severity ORDER BY severity;\")",
+      "Bash(curl -s http://localhost:8080/api/v1/scans)",
+      "Bash(curl -sv http://localhost:8080/api/v1/scans/e29fed2d-d6d8-4e7e-a726-3fe85b440755/results)",
+      "Bash(docker exec deployments-postgres-1 psql -U scanner -d bugscanner -c \"SELECT id, scan_id, subdomain_id, template_id, template_name, severity, matched_url, matched_at, extracted_data, curl_command, reference, is_false_positive, is_triaged, notes, created_at FROM vulnerabilities WHERE scan_id = ''e29fed2d-d6d8-4e7e-a726-3fe85b440755'' LIMIT 2;\")",
+      "Bash(docker exec deployments-postgres-1 psql -U scanner -d bugscanner -c \"\\\\d vulnerabilities\")",
+      "Bash(docker ps --format \"{{.Names}}\")",
+      "Bash(docker compose build orchestrator)",
+      "Bash(docker compose up -d orchestrator)",
+      "Bash(curl -s http://localhost:8080/api/v1/scans/e29fed2d-d6d8-4e7e-a726-3fe85b440755/results)",
+      "Bash(curl -sv http://testphp.vulnweb.com/)",
+      "Bash(curl -s http://localhost:8080/api/v1/scans/e7607326-7c6c-4e15-b8fc-79202e1b0716/results)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(f''Total findings: {len\\(d[\"\"vulnerabilities\"\"]\\)}''\\); [print\\(f''  {v[\"\"severity\"\"]:8} {v[\"\"template_id\"\"]:20} {v[\"\"matched_url\"\"]}''\\) for v in d[''vulnerabilities''][:10]]\")",
+      "Bash(docker exec deployments-postgres-1 psql -U scanner -d bugscanner -c \":*)",
+      "WebSearch",
+      "Bash(docker exec deployments-worker-1 sh -c \"nuclei -u http://testphp.vulnweb.com/index.zip -jsonl -dast 2>&1 | grep -E ''\\(INF|WRN|templates loaded\\)''\")",
+      "Bash(docker exec deployments-worker-1 sh -c \"curl -sI http://testphp.vulnweb.com/index.zip 2>&1 | head -5; curl -sI http://testphp.vulnweb.com/secured/phpinfo.php | head -5\")",
+      "Bash(docker exec deployments-worker-1 sh -c \"nuclei -u http://testphp.vulnweb.com -jsonl 2>&1 | grep ''Templates loaded''\")",
+      "Bash(docker compose restart worker)"
     ]
   }
 }

@@ -48,10 +48,13 @@ func (s *VulnScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 	}
 	tmpFile.Close()
 
-	// Build nuclei args — run all templates (no -tags filter) for thorough coverage.
-	// Technology detection from httpx is logged but not used to restrict templates,
-	// since tag filtering excludes many important vulnerability checks.
-	args := []string{
+	// Two-pass nuclei scan:
+	// Pass 1 — standard http/ templates: passive checks, CVE detection, exposure, misconfigs.
+	//           Runs ~9000 templates. The -dast flag cannot be combined — it replaces the
+	//           template set rather than extending it.
+	// Pass 2 — DAST mode (-dast): activates the fuzzing engine for SQLi, XSS, LFI etc.
+	//           Only 54 templates but actively fuzzes discovered parameters.
+	commonArgs := []string{
 		"-list", tmpFile.Name(),
 		"-jsonl",
 		"-severity", "info,low,medium,high,critical",
@@ -61,20 +64,38 @@ func (s *VulnScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 		"-concurrency", "10",
 	}
 
-	result, err := s.deps.Runner.RunWithTimeout(ctx, s.deps.Config.Tools.Nuclei, args, nil, 30*time.Minute)
+	passiveArgs := append([]string{"-t", "/root/nuclei-templates/http/"}, commonArgs...)
+	dastArgs := append([]string{"-dast"}, commonArgs...)
+
+	var allOutput []byte
+
+	slog.Info("nuclei pass 1: passive/http templates", "scan_id", job.ScanID)
+	passiveResult, err := s.deps.Runner.RunWithTimeout(ctx, s.deps.Config.Tools.Nuclei, passiveArgs, nil, 20*time.Minute)
 	if err != nil {
-		return 0, fmt.Errorf("run nuclei: %w", err)
+		slog.Warn("nuclei passive pass failed", "error", err)
+	} else {
+		slog.Info("nuclei passive pass complete", "bytes", len(passiveResult.Stdout))
+		allOutput = append(allOutput, passiveResult.Stdout...)
 	}
 
-	if len(result.Stdout) > 0 {
-		raw := string(result.Stdout)
+	slog.Info("nuclei pass 2: DAST fuzzing", "scan_id", job.ScanID)
+	dastResult, err := s.deps.Runner.RunWithTimeout(ctx, s.deps.Config.Tools.Nuclei, dastArgs, nil, 15*time.Minute)
+	if err != nil {
+		slog.Warn("nuclei DAST pass failed", "error", err)
+	} else {
+		slog.Info("nuclei DAST pass complete", "bytes", len(dastResult.Stdout))
+		allOutput = append(allOutput, dastResult.Stdout...)
+	}
+
+	if len(allOutput) > 0 {
+		raw := string(allOutput)
 		if len(raw) > 2000 {
 			raw = raw[:2000] + "...(truncated)"
 		}
-		slog.Info("nuclei raw output", "bytes", len(result.Stdout), "output", raw)
+		slog.Info("nuclei combined output", "bytes", len(allOutput), "output", raw)
 	}
 
-	findings, err := parser.ParseNuclei(result.Stdout)
+	findings, err := parser.ParseNuclei(allOutput)
 	if err != nil {
 		return 0, fmt.Errorf("parse nuclei output: %w", err)
 	}

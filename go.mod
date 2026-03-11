@@ -1,6 +1,6 @@
 module github.com/brandon/bugscanner
 
-go 1.22
+go 1.24.0
 
 require (
 	github.com/go-chi/chi/v5 v5.0.12
@@ -8,6 +8,7 @@ require (
 	github.com/rabbitmq/amqp091-go v1.9.0
 	github.com/redis/go-redis/v9 v9.5.1
 	github.com/spf13/viper v1.18.2
+	golang.org/x/net v0.19.0
 	golang.org/x/sync v0.6.0
 )
 

@@ -64,13 +64,20 @@ func (s *VulnScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 		"-concurrency", "10",
 	}
 
-	passiveArgs := append([]string{"-t", "/root/nuclei-templates/http/"}, commonArgs...)
+	// Pass 1 targets: exposures + misconfigurations only.
+	// Running the full http/ tree (9000+ templates) consistently exceeds the timeout.
+	// These two directories cover backup files, source disclosure, phpinfo, git exposure,
+	// open redirects, and server misconfigs — the high-value passive findings for bug bounties.
+	passiveArgs := append([]string{
+		"-t", "/root/nuclei-templates/http/exposures/",
+		"-t", "/root/nuclei-templates/http/misconfiguration/",
+	}, commonArgs...)
 	dastArgs := append([]string{"-dast"}, commonArgs...)
 
 	var allOutput []byte
 
-	slog.Info("nuclei pass 1: passive/http templates", "scan_id", job.ScanID)
-	passiveResult, err := s.deps.Runner.RunWithTimeout(ctx, s.deps.Config.Tools.Nuclei, passiveArgs, nil, 20*time.Minute)
+	slog.Info("nuclei pass 1: exposures + misconfiguration templates", "scan_id", job.ScanID)
+	passiveResult, err := s.deps.Runner.RunWithTimeout(ctx, s.deps.Config.Tools.Nuclei, passiveArgs, nil, 8*time.Minute)
 	if err != nil {
 		slog.Warn("nuclei passive pass failed", "error", err)
 	} else {
@@ -85,6 +92,35 @@ func (s *VulnScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 	} else {
 		slog.Info("nuclei DAST pass complete", "bytes", len(dastResult.Stdout))
 		allOutput = append(allOutput, dastResult.Stdout...)
+	}
+
+	// Pass 3 — POST form fuzzing.
+	// Uses katana's raw form JSONL lines as input (-im jsonl) so nuclei can
+	// parse form field names and fuzz POST body parameters. This catches
+	// SQLi/XSS in login forms, search forms, profile pages, etc. that are
+	// invisible to plain URL-based fuzzing.
+	if len(payload.FormTargets) > 0 {
+		formFile, err := os.CreateTemp("", "nuclei-forms-*.jsonl")
+		if err != nil {
+			slog.Warn("could not create form targets file, skipping POST fuzzing", "error", err)
+		} else {
+			defer os.Remove(formFile.Name())
+			for _, line := range payload.FormTargets {
+				formFile.WriteString(line + "\n")
+			}
+			formFile.Close()
+
+			formArgs := append([]string{"-dast", "-im", "jsonl", "-list", formFile.Name()},
+				commonArgs[2:]...) // reuse rate/concurrency flags but skip the URL -list
+			slog.Info("nuclei pass 3: POST form DAST fuzzing", "forms", len(payload.FormTargets), "scan_id", job.ScanID)
+			formResult, err := s.deps.Runner.RunWithTimeout(ctx, s.deps.Config.Tools.Nuclei, formArgs, nil, 10*time.Minute)
+			if err != nil {
+				slog.Warn("nuclei form DAST pass failed", "error", err)
+			} else {
+				slog.Info("nuclei form DAST pass complete", "bytes", len(formResult.Stdout))
+				allOutput = append(allOutput, formResult.Stdout...)
+			}
+		}
 	}
 
 	if len(allOutput) > 0 {

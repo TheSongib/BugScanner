@@ -8,7 +8,7 @@ A distributed bug bounty scanner built in Go. Chains ProjectDiscovery tools thro
 ---
 
 ## Tech Stack
-- **Language:** Go 1.22
+- **Language:** Go 1.24 (`go.mod`: `go 1.24.0`, `Dockerfile.worker`: `golang:1.24-alpine`)
 - **Module:** `github.com/brandon/bugscanner`
 - **API:** chi router, port 8080
 - **Database:** PostgreSQL 16 (pgx/v5 driver)
@@ -33,7 +33,7 @@ POST /api/v1/scans
        │
   queue.crawl      → katana
        │
-  queue.vulnscan   → nuclei (all templates, no -tags filter, 30 min timeout)
+  queue.vulnscan   → nuclei (3-pass: exposures+misconfig / DAST GET / DAST POST forms)
        │
   PostgreSQL + Discord/Slack webhook
 ```
@@ -144,7 +144,7 @@ curl -X POST http://localhost:8080/api/v1/scans \
     "scope_in": ["^([a-z0-9-]+\\.)?vulnweb\\.com$"]
   }'
 ```
-This is Acunetix's deliberately vulnerable test site. Expect ~5 min scan time.
+This is Acunetix's deliberately vulnerable test site. Expect ~35-40 min scan time (Pass 1: ~2min, Pass 2 DAST: ~15min, Pass 3 form DAST: ~16min). Confirmed 43 findings as of Session 5: 19 critical SQLi + 24 medium XSS including POST form vulns.
 
 ---
 
@@ -171,10 +171,13 @@ Naabu is configured to scan only 20 common web ports (`-p "80,443,8080,8443,..."
 `cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}` is set for ALL subprocesses in runner.go.
 Without this, tools (especially httpx) run in the parent's process session and exhibit different network behavior than `docker exec`. This was the root cause of httpx producing 0 output for weeks.
 
-### Nuclei 30-min timeout kills crawl-based scans
-The vulnscan stage has a 30-minute `RunWithTimeout`. When the crawl stage finds 83 URLs and passes them all to a second nuclei run, nuclei tries to scan 83 URLs × ~7000 templates. At 50 req/s this takes ~3 hours, so the timeout kills it (`exit_code:-1`, 0 stdout — nuclei was killed before flushing output). **Not fixed yet.** Options: increase timeout or reduce template scope for crawled URLs.
+### Nuclei three-pass design (Session 4+5)
+VulnScan now runs three nuclei passes per job:
+1. **Pass 1** — `-t http/exposures/ -t http/misconfiguration/` (8 min timeout): backup files, phpinfo, git exposure, misconfigs. Fast (~60-90s on single URL, times out on 83-URL jobs).
+2. **Pass 2** — `-dast` (15 min timeout): fuzzes GET params in all crawled URLs for SQLi, XSS, LFI.
+3. **Pass 3** — `-dast -im jsonl` (10 min timeout): fuzzes POST form body params. Only runs if `FormTargets` is non-empty in the payload.
 
-The first nuclei run (1 URL from httpprobe) completes fine with findings. So scans still produce results.
+Previously ran ALL 9000+ `http/` templates with a 30-min timeout — always killed with 0 output.
 
 ### testphp.vulnweb.com server intermittency
 The Acunetix test server at 44.228.249.3 (AWS) is sometimes unreachable (no port 80 response). This is an external issue, not a code issue. Scans that hit a down window will terminate at portscan (0 ports found). Retry the scan when the server is up.
@@ -213,6 +216,17 @@ Not in the Docker image. Discovery stage logs WARN and continues with subfinder 
 20. **httpx 0 output after naabu portscan** — naabu's 1000-port connect scan at 1000/s fills Docker conntrack table; recovery takes ~60s. Fixed by scanning only 20 web-relevant ports at 300/s (`-p "80,443,8080,8443,..."`) — no conntrack disruption.
 21. **nuclei/katana `-json` flag doesn't exist** — These tool versions use `-jsonl` (not `-json`). "flag provided but not defined: -json" was the 37-byte stdout causing silent failures. Fixed by switching to `-jsonl`.
 22. **httpx parser** — Added `input` field as URL fallback, debug logging for skipped results, slog warning on JSON parse failures.
+
+### Session 4 (2026-03-10)
+23. **nuclei `-dast` replaces template set** — `-dast` flag does NOT add to existing templates, it replaces them with only 54 DAST templates. Previously combined with `-t` causing no output. Fixed with two-pass approach: Pass 1 = passive templates, Pass 2 = `-dast` only.
+24. **pgx v5 NULL column scan** — pgx v5 cannot scan SQL NULL into a non-pointer `string`. Fixed by using `*string` temp vars for all nullable columns in `vulnerability.go` and `scan.go` (`subdomainID`, `templateName`, `matchedAt`, `curlCommand`, `notes`, `workerID`, `errorMessage`).
+25. **nuclei passive pass timeout** — Running all 9000+ `http/` templates always exceeded the 20-min timeout with 0 output. Confirmed two-pass DAST scan finding 36 vulnerabilities (16 critical SQLi + 20 medium XSS) on testphp.vulnweb.com.
+
+### Session 5 (2026-03-11)
+26. **Nuclei passive pass scoped** — Changed Pass 1 from `-t /root/nuclei-templates/http/` (9000+ templates, always times out) to `-t http/exposures/ -t http/misconfiguration/` (~200 templates). Timeout reduced from 20 min to 8 min. Now reliably completes on single-URL httpprobe jobs.
+27. **POST form fuzzing added** — `katana -form-extraction` does not emit POST form entries in non-headless mode (confirmed by inspection — only GET link entries appear). Headless Chromium is in the worker image but hangs in Docker. Solution: new `formextract.go` file uses `golang.org/x/net/html` to GET each crawled page, parse `<form>` elements, extract field names, and build synthetic katana-format JSONL. These are passed to a new Pass 3 (`-dast -im jsonl`) which fuzzes POST body params. Caught 3 new findings: `userinfo.php` SQLi, `userinfo.php` XSS, `guestbook.php` XSS.
+28. **Go version bump** — Adding `golang.org/x/net` as a direct dep caused `go mod tidy` to upgrade the `go` directive to 1.25+ (matching local toolchain 1.26.1). Resolved by pinning `x/net@v0.19.0`, `x/sync@v0.6.0`, and other `x/*` to older versions compatible with go 1.24. Updated `Dockerfile.worker` from `golang:1.22-alpine` → `golang:1.24-alpine`.
+29. **VulnScanPayload extended** — Added `FormTargets []string` field to carry raw katana-format JSONL lines from crawl stage through the message queue to the vulnscan stage. Crawl stage calls `extractFormsFromPages()` → `parseFormsFromURLs()` after katana completes.
 
 ---
 

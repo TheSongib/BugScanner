@@ -130,7 +130,10 @@ func (s *VulnScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 		} else {
 			defer os.Remove(formFile.Name())
 			for _, line := range payload.FormTargets {
-				formFile.WriteString(line + "\n")
+				if _, err := formFile.WriteString(line + "\n"); err != nil {
+					slog.Warn("failed to write form target to temp file; POST fuzzing input may be incomplete", "error", err)
+					break
+				}
 			}
 			formFile.Close()
 

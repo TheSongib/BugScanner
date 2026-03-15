@@ -134,8 +134,26 @@ func (s *VulnScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 			}
 			formFile.Close()
 
+			// Reuse common nuclei flags but drop any existing -list argument so we can
+			// safely substitute the form targets file, without depending on the
+			// positional layout of commonArgs.
+			withoutList := func(args []string) []string {
+				filtered := make([]string, 0, len(args))
+				for i := 0; i < len(args); i++ {
+					if args[i] == "-list" {
+						// Skip "-list" and its value (if present).
+						if i+1 < len(args) {
+							i++
+						}
+						continue
+					}
+					filtered = append(filtered, args[i])
+				}
+				return filtered
+			}
+
 			formArgs := append([]string{"-dast", "-im", "jsonl", "-list", formFile.Name()},
-				commonArgs[2:]...) // reuse rate/concurrency flags but skip the URL -list
+				withoutList(commonArgs)...) // reuse rate/concurrency flags but skip the URL -list
 			slog.Info("nuclei pass 3: POST form DAST fuzzing", "forms", len(payload.FormTargets), "scan_id", job.ScanID)
 			formResult, err := s.deps.Runner.RunWithTimeout(ctx, s.deps.Config.Tools.Nuclei, formArgs, nil, 10*time.Minute)
 			if err != nil {

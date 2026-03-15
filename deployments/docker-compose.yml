@@ -30,6 +30,10 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: scanner
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-changeme}
+      # RabbitMQ 3.12+ enforces a 30-minute consumer_timeout by default.
+      # Vulnscan runs 4 nuclei passes (8+15+10+20 min = 53 min worst case),
+      # so the default would forcibly close the channel mid-scan. Set to 2 hours.
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit consumer_timeout 7200000"
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -71,7 +75,10 @@ services:
       REDIS_URL: redis://redis:6379/0
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-3}
     volumes:
-      - nuclei-templates:/root/.local/nuclei-templates
+      # nuclei stores templates at $HOME/nuclei-templates/ (not .local/).
+      # Mounting here lets you run `docker compose exec worker nuclei -update-templates`
+      # to refresh templates on a live stack without rebuilding the image.
+      - nuclei-templates:/root/nuclei-templates
     depends_on:
       postgres:
         condition: service_healthy

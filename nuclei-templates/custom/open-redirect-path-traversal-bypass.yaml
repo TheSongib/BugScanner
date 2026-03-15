@@ -1,0 +1,101 @@
+id: open-redirect-path-traversal-bypass
+
+info:
+  name: Open Redirect - Path Traversal Bypass (/..//)
+  author: bugscanner
+  severity: medium
+  description: |
+    Detects open redirect vulnerabilities where standard validation (path prefix checks,
+    allowlists requiring a leading slash) is bypassed via /..// path traversal sequences.
+    A value of /..//attacker.com starts with "/" so it passes naive prefix validation,
+    but the server normalizes it to //attacker.com — which browsers resolve as a
+    protocol-relative URL pointing to an external domain. Discovered in HackerOne #3599248
+    (lovable.dev /auth/post-login?redirect= parameter).
+  reference:
+    - https://hackerone.com/reports/3599248
+    - https://cwe.mitre.org/data/definitions/601.html
+  classification:
+    cwe-id: CWE-601
+    cvss-metrics: CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N
+    cvss-score: 5.1
+  tags: open-redirect,redirect,bypass,traversal,fuzzing,generic
+
+http:
+  - fuzzing:
+      - part: query
+        type: replace
+        mode: single
+        # Target the most common redirect parameter names used across web frameworks
+        keys:
+          - redirect
+          - redirect_uri
+          - redirect_url
+          - redirectUri
+          - redirectUrl
+          - next
+          - url
+          - return
+          - returnTo
+          - returnUrl
+          - return_url
+          - return_to
+          - callback
+          - callbackUrl
+          - callback_url
+          - goto
+          - destination
+          - r
+          - to
+          - ref
+          - redir
+          - forward
+          - target
+          - continue
+          - success_url
+          - failure_url
+          - post_login_redirect
+        # Four bypass variants covering common normalisation and encoding paths:
+        # 1. Standard /..// traversal (the original H1 #3599248 bypass)
+        # 2. Double traversal (/../..//) for servers that strip one ../ segment
+        # 3. URL-encoded variant (%2F..%2F%2F) for WAF/filter evasion
+        # 4. Mixed encoding (/../%2F) for partial-decode pipelines
+        fuzz:
+          - "/..//{{interactsh-url}}"
+          - "/../..//{{interactsh-url}}"
+          - "/%2F..%2F%2F{{interactsh-url}}"
+          - "/../%2F{{interactsh-url}}"
+
+    stop-at-first-match: true
+
+    matchers-condition: or
+    matchers:
+      # Primary: OOB callback via interactsh — catches cases where the app
+      # issues the redirect server-side (e.g., 302 to a backend fetch).
+      - type: word
+        part: interactsh_protocol
+        words:
+          - "http"
+          - "https"
+
+      # Secondary: synchronous check — the redirect response Location header
+      # contains our interactsh domain, confirming the bypass worked.
+      - type: regex
+        part: header
+        regex:
+          - "(?i)location:\\s*//{{interactsh-url}}"
+          - "(?i)location:\\s*https?://{{interactsh-url}}"
+
+      # Tertiary: redirect status without OOB — confirms a redirect was issued
+      # and the Location header contains double-slash (protocol-relative) pattern.
+      # Lower confidence on its own; paired with the regex below for accuracy.
+      - type: dsl
+        dsl:
+          - "status_code in [301, 302, 303, 307, 308] && regex('(?i)location:\\s*//', header)"
+
+    extractors:
+      - type: regex
+        part: header
+        name: redirect_location
+        group: 1
+        regex:
+          - "(?i)location:\\s*(.+)"

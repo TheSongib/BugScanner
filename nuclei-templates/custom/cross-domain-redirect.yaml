@@ -1,0 +1,62 @@
+id: cross-domain-redirect-detected
+
+info:
+  name: Cross-Domain Redirect Detected
+  author: bugscanner
+  severity: info
+  description: |
+    The server issues an absolute-URL redirect (3xx) whose Location header points to a
+    different host than the one being scanned. This is a risk surface for HTTP clients
+    (particularly libcurl) that follow redirects without stripping custom authentication
+    headers. While the standard Authorization header is stripped on cross-domain redirects,
+    custom headers such as X-API-Key, X-Auth-Token, and X-Service-Token are forwarded
+    verbatim to the redirect destination — which may be attacker-controlled.
+
+    Any application or API client using automatic redirect following alongside custom
+    header-based authentication should validate this endpoint. See HackerOne #3595764.
+  reference:
+    - https://hackerone.com/reports/3595764
+    - https://curl.se/docs/CVE-2018-1000007.html
+    - https://cwe.mitre.org/data/definitions/200.html
+  classification:
+    cwe-id: CWE-200
+    cvss-metrics: CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N
+    cvss-score: 3.1
+  tags: redirect,cross-domain,header-leak,curl,info,generic
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}"
+
+    matchers-condition: and
+    matchers:
+      # Must be a redirect response
+      - type: status
+        status:
+          - 301
+          - 302
+          - 303
+          - 307
+          - 308
+
+      # Location must contain an absolute URL (not a relative path redirect)
+      - type: regex
+        part: header
+        regex:
+          - "(?i)location:\\s*https?://"
+
+      # Location must NOT reference the scanned hostname — cross-domain only.
+      # Same-host http→https upgrades and path redirects are excluded.
+      # Uses DSL so we can compare against the dynamic {{Hostname}} value.
+      - type: dsl
+        dsl:
+          - "!contains(tolower(header), tolower(Hostname))"
+
+    extractors:
+      - type: regex
+        part: header
+        name: redirect_destination
+        group: 1
+        regex:
+          - "(?i)location:\\s*(https?://[^\\s\\r\\n]+)"

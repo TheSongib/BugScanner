@@ -105,6 +105,9 @@ func (s *Server) handleListScans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if scans == nil {
+		scans = []database.Scan{}
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"scans": scans, "count": len(scans)})
 }
 
@@ -120,6 +123,9 @@ func (s *Server) handleGetScan(w http.ResponseWriter, r *http.Request) {
 	jobs, err := s.scanRepo.GetJobsByScanID(r.Context(), scanID)
 	if err != nil {
 		slog.Error("failed to get scan jobs", "error", err)
+	}
+	if jobs == nil {
+		jobs = []database.ScanJob{}
 	}
 
 	writeJSON(w, http.StatusOK, ScanResponse{Scan: scan, Jobs: jobs})
@@ -139,6 +145,9 @@ func (s *Server) handleGetScanResults(w http.ResponseWriter, r *http.Request) {
 		slog.Error("failed to get vulnerabilities", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to get results"})
 		return
+	}
+	if vulns == nil {
+		vulns = []database.Vulnerability{}
 	}
 
 	writeJSON(w, http.StatusOK, ScanResultsResponse{Scan: scan, Vulnerabilities: vulns})
@@ -189,6 +198,9 @@ func (s *Server) handleListVulnerabilities(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to list vulnerabilities"})
 		return
 	}
+	if vulns == nil {
+		vulns = []database.Vulnerability{}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"vulnerabilities": vulns, "count": len(vulns)})
 }
@@ -199,7 +211,11 @@ func (s *Server) handleMarkFalsePositive(w http.ResponseWriter, r *http.Request)
 	var req struct {
 		Notes string `json:"notes"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	// Notes body is optional — a missing or empty body is valid (notes will be "").
+	// Log decode errors so malformed JSON is visible in logs without blocking the request.
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.Debug("could not decode false-positive request body, proceeding with empty notes", "error", err)
+	}
 
 	if err := s.vulnRepo.MarkFalsePositive(r.Context(), vulnID, req.Notes); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to update"})
@@ -215,7 +231,11 @@ func (s *Server) handleMarkTriaged(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Notes string `json:"notes"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	// Notes body is optional — a missing or empty body is valid (notes will be "").
+	// Log decode errors so malformed JSON is visible in logs without blocking the request.
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.Debug("could not decode triage request body, proceeding with empty notes", "error", err)
+	}
 
 	if err := s.vulnRepo.MarkTriaged(r.Context(), vulnID, req.Notes); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to update"})

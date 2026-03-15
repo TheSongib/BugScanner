@@ -209,10 +209,15 @@ func resolveURL(pageURL, action string) string {
 
 // isAsset returns true for URLs that are unlikely to contain HTML forms.
 func isAsset(u string) bool {
-	lower := strings.ToLower(u)
+	path := u
+	if parsed, err := url.Parse(u); err == nil && parsed.Path != "" {
+		path = parsed.Path
+	}
+
+	lowerPath := strings.ToLower(path)
 	for _, ext := range []string{".css", ".js", ".png", ".jpg", ".jpeg", ".gif",
 		".svg", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".pdf", ".zip"} {
-		if strings.Contains(lower, ext) {
+		if strings.HasSuffix(lowerPath, ext) {
 			return true
 		}
 	}

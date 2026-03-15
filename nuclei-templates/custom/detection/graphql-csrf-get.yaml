@@ -1,0 +1,78 @@
+id: graphql-csrf-via-get
+
+info:
+  name: GraphQL CSRF - Mutations Accepted via GET Request
+  author: bugscanner
+  severity: high
+  description: |
+    GraphQL endpoints that accept state-changing mutations via GET requests are
+    vulnerable to CSRF attacks. Because GET requests are considered "simple"
+    requests by CORS, they can be triggered cross-origin without a preflight,
+    bypassing CSRF token protection. An attacker can embed the mutation in a
+    URL on a malicious page and trick an authenticated user into visiting it.
+    HackerOne paid $3,370 for this exact class (#1122408).
+  reference:
+    - https://hackerone.com/reports/1122408
+    - https://portswigger.net/web-security/graphql/what-is-graphql
+  tags: custom,graphql,csrf,misconfig
+
+http:
+  # Test if GraphQL accepts mutations via GET with query parameter
+  - method: GET
+    path:
+      - "{{BaseURL}}/graphql?query=mutation{__typename}"
+      - "{{BaseURL}}/api/graphql?query=mutation{__typename}"
+      - "{{BaseURL}}/v1/graphql?query=mutation{__typename}"
+      - "{{BaseURL}}/query?query=mutation{__typename}"
+      - "{{BaseURL}}/gql?query=mutation{__typename}"
+      # Also test with Content-Type: text/plain (bypasses CORS preflight)
+      - "{{BaseURL}}/graphql?query=%7B__typename%7D"
+      - "{{BaseURL}}/api/graphql?query=%7B__typename%7D"
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: body
+        words:
+          - "__typename"
+          - '"data"'
+        condition: and
+
+  # Test with text/plain Content-Type (bypasses CORS preflight for CSRF)
+  - method: POST
+    path:
+      - "{{BaseURL}}/graphql"
+      - "{{BaseURL}}/api/graphql"
+      - "{{BaseURL}}/v1/graphql"
+      - "{{BaseURL}}/query"
+      - "{{BaseURL}}/gql"
+
+    headers:
+      Content-Type: "text/plain"
+
+    body: '{"query":"mutation{__typename}"}'
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: body
+        words:
+          - "__typename"
+          - '"data"'
+        condition: and
+
+      # Confirm CSRF protection is missing (no CSRF token required)
+      - type: word
+        part: header
+        negative: true
+        words:
+          - "X-CSRF-Token"
+          - "CSRF"

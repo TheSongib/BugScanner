@@ -1,0 +1,50 @@
+id: graphql-introspection-enabled
+
+info:
+  name: GraphQL Introspection Enabled
+  author: bugscanner
+  severity: medium
+  description: |
+    GraphQL introspection is enabled, exposing the full API schema including all
+    types, queries, mutations, and subscriptions. Attackers can use this to map
+    the entire API surface and discover hidden endpoints or sensitive fields.
+  reference:
+    - https://portswigger.net/web-security/graphql
+    - https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html
+  tags: custom,graphql,exposure,misconfig
+
+http:
+  - method: POST
+    path:
+      - "{{BaseURL}}/graphql"
+      - "{{BaseURL}}/api/graphql"
+      - "{{BaseURL}}/v1/graphql"
+      - "{{BaseURL}}/v2/graphql"
+      - "{{BaseURL}}/query"
+      - "{{BaseURL}}/api/query"
+      - "{{BaseURL}}/gql"
+      - "{{BaseURL}}/graph"
+      - "{{BaseURL}}/api/graph"
+
+    headers:
+      Content-Type: application/json
+
+    body: '{"query":"{__schema{queryType{name}types{name kind description}}}"}'
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: body
+        words:
+          - "__schema"
+          - "queryType"
+        condition: and
+
+      - type: word
+        part: body
+        words:
+          - '"data"'

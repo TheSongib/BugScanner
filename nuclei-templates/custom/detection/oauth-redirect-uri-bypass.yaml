@@ -1,0 +1,60 @@
+id: oauth-redirect-uri-bypass
+
+info:
+  name: OAuth redirect_uri Open Redirect / Validation Bypass
+  author: bugscanner
+  severity: high
+  description: |
+    OAuth authorization endpoints with weak redirect_uri validation allow an
+    attacker to steal authorization codes by redirecting victims to an
+    attacker-controlled server. Common bypass techniques include: adding extra
+    path segments after the whitelisted URI, using URL fragments, using
+    open redirects on the whitelisted domain, or subdomain confusion.
+    Multiple H1 reports in this class ($2,000–$5,000 range).
+  reference:
+    - https://portswigger.net/web-security/oauth
+    - https://hackerone.com/reports/1861974
+    - https://hackerone.com/reports/861940
+  tags: custom,oauth,redirect,authorization,misconfig
+
+http:
+  # Test common OAuth authorization endpoints with bypass redirect_uri values
+  - method: GET
+    path:
+      # Path append bypass: whitelisted.com/callback/../../../evil.com
+      - "{{BaseURL}}/oauth/authorize?response_type=code&client_id=test&redirect_uri=https://evil.oauth-test.example.com"
+      - "{{BaseURL}}/auth/authorize?response_type=code&client_id=test&redirect_uri=https://evil.oauth-test.example.com"
+      - "{{BaseURL}}/oauth2/authorize?response_type=code&client_id=test&redirect_uri=https://evil.oauth-test.example.com"
+      - "{{BaseURL}}/connect/authorize?response_type=code&client_id=test&redirect_uri=https://evil.oauth-test.example.com"
+      - "{{BaseURL}}/oauth/auth?response_type=code&client_id=test&redirect_uri=https://evil.oauth-test.example.com"
+      - "{{BaseURL}}/api/oauth/authorize?response_type=code&client_id=test&redirect_uri=https://evil.oauth-test.example.com"
+      # Also probe for the existence of OAuth endpoints (discovery)
+      - "{{BaseURL}}/.well-known/openid-configuration"
+      - "{{BaseURL}}/.well-known/oauth-authorization-server"
+      - "{{BaseURL}}/oauth/.well-known/openid-configuration"
+
+    matchers-condition: or
+    matchers:
+      # Redirect to our evil domain was accepted
+      - type: word
+        part: header
+        words:
+          - "evil.oauth-test.example.com"
+        name: redirect-uri-bypass-accepted
+
+      # OAuth server metadata discovered (informational — useful for further testing)
+      - type: word
+        part: body
+        words:
+          - '"authorization_endpoint"'
+          - '"token_endpoint"'
+          - '"issuer"'
+        condition: and
+        name: oauth-discovery-endpoint-found
+
+      # Authorization endpoint returned redirect to attacker (code theft possible)
+      - type: regex
+        part: header
+        regex:
+          - "Location:.*evil\\.oauth-test\\.example\\.com"
+        name: code-redirect-to-evil-domain

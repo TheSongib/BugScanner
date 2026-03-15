@@ -1,0 +1,42 @@
+id: cross-domain-redirect
+
+info:
+  name: Cross-Domain Open Redirect via User-Controlled Parameter
+  author: bugscanner
+  severity: medium
+  description: |
+    Tests whether common redirect parameters accept arbitrary external domains,
+    indicating an open redirect vulnerability that can be exploited for phishing
+    or as a stepping stone for SSRF bypass chains.
+  tags: custom,redirect,open-redirect
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/?redirect=https://evil.example.com"
+      - "{{BaseURL}}/?url=https://evil.example.com"
+      - "{{BaseURL}}/?next=https://evil.example.com"
+      - "{{BaseURL}}/?return=https://evil.example.com"
+      - "{{BaseURL}}/?returnTo=https://evil.example.com"
+      - "{{BaseURL}}/?continue=https://evil.example.com"
+      - "{{BaseURL}}/?goto=https://evil.example.com"
+      - "{{BaseURL}}/?dest=https://evil.example.com"
+      - "{{BaseURL}}/?target=https://evil.example.com"
+      - "{{BaseURL}}/?redir=https://evil.example.com"
+      - "{{BaseURL}}/?r=https://evil.example.com"
+      - "{{BaseURL}}/?ref=https://evil.example.com"
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 301
+          - 302
+          - 303
+          - 307
+          - 308
+
+      - type: word
+        part: header
+        words:
+          - "evil.example.com"

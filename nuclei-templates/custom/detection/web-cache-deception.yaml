@@ -1,0 +1,65 @@
+id: web-cache-deception
+
+info:
+  name: Web Cache Deception - Authenticated Content Served Unauthenticated
+  author: bugscanner
+  severity: high
+  description: |
+    Web cache deception tricks a CDN/reverse proxy into caching an authenticated
+    endpoint by appending a fake static file suffix (e.g., /profile/test.css).
+    If the backend ignores the suffix and serves authenticated content while the
+    cache layer stores it as a static asset, any unauthenticated user requesting
+    the same URL will receive the cached authenticated response.
+    Distinct from cache poisoning — this leaks the victim's own data rather than
+    injecting malicious content.
+  reference:
+    - https://portswigger.net/web-security/web-cache-deception
+    - https://hackerone.com/reports/1271944
+    - https://hackerone.com/reports/537564
+  tags: custom,cache-deception,information-disclosure,misconfig
+
+http:
+  # Test commonly authenticated endpoints by appending fake static suffixes.
+  # A finding means the server returned 200 + user-specific content for what
+  # should be an auth-protected endpoint — a CDN would happily cache this.
+  - method: GET
+    path:
+      - "{{BaseURL}}/profile/deception-test.css"
+      - "{{BaseURL}}/account/deception-test.css"
+      - "{{BaseURL}}/dashboard/deception-test.css"
+      - "{{BaseURL}}/settings/deception-test.css"
+      - "{{BaseURL}}/me/deception-test.css"
+      - "{{BaseURL}}/user/deception-test.css"
+      - "{{BaseURL}}/api/me/deception-test.json"
+      - "{{BaseURL}}/api/profile/deception-test.json"
+      - "{{BaseURL}}/api/v1/me/deception-test.json"
+      - "{{BaseURL}}/api/v1/user/deception-test.json"
+      # Also test .js and .png extensions which CDNs aggressively cache
+      - "{{BaseURL}}/profile/deception-test.js"
+      - "{{BaseURL}}/account/deception-test.js"
+      - "{{BaseURL}}/settings/deception-test.png"
+      - "{{BaseURL}}/dashboard/deception-test.png"
+
+    matchers-condition: and
+    matchers:
+      # Must return 200 (authenticated content served)
+      - type: status
+        status:
+          - 200
+
+      # Must contain personal/account data patterns — confirming auth content leaked
+      - type: regex
+        part: body
+        regex:
+          - '"email"\s*:\s*"[^"]+@[^"]+"'
+          - '"username"\s*:\s*"[^"]+"'
+          - '"user_id"\s*:\s*\d+'
+          - '"userId"\s*:\s*\d+'
+          - '"account_id"\s*:\s*'
+          - '"phone"\s*:\s*"[^"]+"'
+          - '"address"\s*:\s*"[^"]+"'
+          - '"credit_card"\s*:'
+          - '"token"\s*:\s*"[^"]+"'
+          - '"session"\s*:\s*"[^"]+"'
+          - '"api_key"\s*:\s*"[^"]+"'
+        condition: or

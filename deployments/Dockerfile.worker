@@ -40,4 +40,8 @@ RUN nuclei -update-templates
 COPY --from=builder /worker /usr/local/bin/worker
 COPY configs/config.yaml /etc/bugscanner/config.yaml
 
+# Copy custom nuclei templates into the image
+COPY nuclei-templates/custom/detection/ /root/custom-templates/detection/
+COPY nuclei-templates/custom/fuzz/ /root/custom-templates/fuzz/
+
 ENTRYPOINT ["worker"]

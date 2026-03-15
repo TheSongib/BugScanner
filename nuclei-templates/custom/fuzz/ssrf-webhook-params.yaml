@@ -1,0 +1,104 @@
+id: ssrf-webhook-params
+
+info:
+  name: SSRF via Webhook and URL-Accepting Parameters (OOB)
+  author: bugscanner
+  severity: high
+  description: |
+    Targets parameters commonly used for webhooks, callbacks, remote imports,
+    and URL-fetching features (url, webhook, callback, endpoint, dest, etc.).
+    Replaces their values with an interactsh OOB URL. An HTTP callback to the
+    interactsh server confirms that the application made a server-side HTTP
+    request to the attacker-controlled URL — Server-Side Request Forgery.
+  reference:
+    - https://portswigger.net/web-security/ssrf
+    - https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Request%20Forgery
+  tags: custom,ssrf,webhook,oob,interactsh,oast,fuzz
+
+http:
+  - pre-condition:
+      - type: dsl
+        dsl:
+          - 'len(query) > 0 || method == "POST"'
+
+    fuzzing:
+      # Fuzz only parameters whose names match common URL/webhook parameter names
+      - part: query
+        type: replace
+        mode: single
+        keys:
+          - url
+          - webhook
+          - webhook_url
+          - webhookUrl
+          - callback
+          - callback_url
+          - callbackUrl
+          - endpoint
+          - target
+          - dest
+          - destination
+          - hook
+          - hookUrl
+          - hook_url
+          - source
+          - src
+          - feed
+          - feed_url
+          - feedUrl
+          - import_url
+          - importUrl
+          - proxy
+          - proxy_url
+          - proxyUrl
+          - notify_url
+          - notifyUrl
+          - ping_url
+          - pingUrl
+          - remote
+          - remote_url
+          - remoteUrl
+          - site
+          - link
+          - fetch
+          - load
+        fuzz:
+          - "http://{{interactsh-url}}/ssrf-probe"
+          - "https://{{interactsh-url}}/ssrf-probe"
+
+      # Same set for JSON POST bodies
+      - part: body
+        type: replace
+        mode: single
+        keys:
+          - url
+          - webhook
+          - webhook_url
+          - webhookUrl
+          - callback
+          - callback_url
+          - callbackUrl
+          - endpoint
+          - target
+          - dest
+          - destination
+          - hookUrl
+          - hook_url
+          - notify_url
+          - notifyUrl
+          - remote_url
+          - remoteUrl
+          - feed_url
+          - feedUrl
+          - import_url
+          - importUrl
+        fuzz:
+          - "http://{{interactsh-url}}/ssrf-probe"
+          - "https://{{interactsh-url}}/ssrf-probe"
+
+    matchers:
+      - type: word
+        part: interactsh_protocol
+        words:
+          - "http"
+        name: ssrf-oob-http-callback-confirmed

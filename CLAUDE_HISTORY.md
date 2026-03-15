@@ -184,6 +184,90 @@ Not in the Docker image. Discovery stage logs WARN and continues with subfinder 
 
 ---
 
+---
+
+## Session 7 (2026-03-15) — H1 Hacktivity Analysis + 20 Custom Nuclei Templates
+
+### Summary
+Analyzed ~610 disclosed HackerOne bug bounty reports across 2 batches to identify gaps in the scanner's coverage. Built 20 custom nuclei templates and restructured the vuln scan from 2 passes to 4 passes. Build confirmed working.
+
+### H1 Coverage Analysis
+- **Batch 1** (~442 reports — RCE, SSRF, XSS, SQLi, IDOR, path traversal, XXE, SSTI, subdomain takeover, NoSQL, open redirect, HTTP smuggling, deserialization, prompt injection): **~35% coverage**
+- **Batch 2** (~168 reports — CSRF, auth bypass, 2FA bypass, business logic, race conditions, clickjacking, GraphQL-specific, OAuth/OIDC, cache poisoning/deception, mobile, file upload chains, DoS, credential exposure): **~13% coverage**
+- **Combined: ~29% coverage**
+- Batch 2's low rate is structural — business logic, race conditions, 2FA bypass, OAuth flow bugs, and mobile vulnerabilities cannot be reliably automated by a passive/active web scanner
+
+### Pipeline Change: 2-Pass → 4-Pass Nuclei Scan
+
+**Before (2 passes):**
+```go
+passiveArgs := append([]string{"-t", "/root/nuclei-templates/http/"}, commonArgs...)  // 20 min
+dastArgs    := append([]string{"-dast"}, commonArgs...)                               // 15 min
+```
+
+**After (4 passes):**
+```go
+passiveArgs    := append([]string{"-t", "/root/nuclei-templates/http/"}, commonArgs...)          // Pass 1: 20 min
+dastArgs       := append([]string{"-dast"}, commonArgs...)                                        // Pass 2: 15 min
+customArgs     := append([]string{"-t", "/root/custom-templates/detection/"}, commonArgs...)      // Pass 3: 10 min
+customDastArgs := append([]string{"-dast", "-t", "/root/custom-templates/fuzz/"}, commonArgs...) // Pass 4: 12 min
+```
+Total budget: ~57 min. Well within 2-hour RabbitMQ consumer timeout.
+
+### Dockerfile.worker Change
+Added COPY commands to bake custom templates into the worker image:
+```dockerfile
+COPY nuclei-templates/custom/detection/ /root/custom-templates/detection/
+COPY nuclei-templates/custom/fuzz/ /root/custom-templates/fuzz/
+```
+
+### 15 Custom Detection Templates (nuclei-templates/custom/detection/)
+Run in Pass 3 without -dast. Each probes specific endpoints or injects specific headers:
+
+| Template | What It Catches |
+|---|---|
+| `open-redirect-path-traversal-bypass.yaml` | //, /%2f/, path traversal redirect bypass + interactsh OOB |
+| `cross-domain-redirect.yaml` | Redirect param accepts arbitrary external domain |
+| `broken-access-control-privilege-params.yaml` | role:admin / isAdmin:true reflected on update endpoints |
+| `graphql-introspection.yaml` | GraphQL __schema introspection enabled in production |
+| `graphql-batch-query.yaml` | Batch mutations enabled (rate-limit bypass vector) |
+| `graphql-csrf-get.yaml` | GraphQL mutations fire via GET or text/plain POST (CSRF) |
+| `host-header-injection.yaml` | X-Forwarded-Host reflected in body/headers |
+| `password-reset-host-poisoning.yaml` | Reset endpoint uses poisoned X-Forwarded-Host (interactsh OOB) |
+| `crlf-injection.yaml` | CRLF in URL/params injects raw HTTP response headers |
+| `web-cache-poisoning.yaml` | Unkeyed headers (X-Forwarded-Host, X-Original-URL) reflected |
+| `web-cache-deception.yaml` | Fake .css/.js suffix on auth endpoints returns 200 + PII |
+| `cors-origin-bypass.yaml` | Arbitrary + null origin with Access-Control-Allow-Credentials: true |
+| `oauth-redirect-uri-bypass.yaml` | OAuth redirect_uri accepts external domain; discovers .well-known |
+| `sentry-dsn-exposure.yaml` | Sentry DSN regex in HTML, JS bundles, config JSON |
+| `prompt-injection-endpoint.yaml` | AI/LLM endpoints disclosing system prompt after injection |
+
+### 5 Custom DAST Fuzzing Templates (nuclei-templates/custom/fuzz/)
+Run in Pass 4 with -dast flag. Use nuclei's fuzzing engine to inject into discovered params:
+
+| Template | What It Catches |
+|---|---|
+| `blind-xss-oob.yaml` | XSS payloads with interactsh callbacks in query params, body, User-Agent, Referer, X-Forwarded-For |
+| `nosql-injection-query.yaml` | $ne/$gt/$regex in query string (MongoDB error-based detection) |
+| `nosql-injection-json.yaml` | $ne/$gt in JSON POST body (error + auth bypass detection) |
+| `ssrf-webhook-params.yaml` | 35+ webhook/URL param names (url, webhook, callback, dest…) fuzzed with interactsh OOB |
+| `prototype-pollution.yaml` | __proto__ and constructor.prototype in query string and JSON body |
+
+### Important: Custom Templates Were Previously Never Called
+In prior sessions, custom templates were created in `nuclei-templates/custom/` but:
+1. Never referenced in `vulnscan.go`
+2. Never COPY'd into the Dockerfile
+This was the root cause. Fix was to update both files simultaneously whenever templates are added.
+
+### Verification Checklist (run after any template change)
+1. Template YAML files exist in `nuclei-templates/custom/detection/` or `nuclei-templates/custom/fuzz/`
+2. `Dockerfile.worker` has `COPY nuclei-templates/custom/detection/ /root/custom-templates/detection/` and `COPY nuclei-templates/custom/fuzz/ /root/custom-templates/fuzz/`
+3. `vulnscan.go` Pass 3 uses `-t /root/custom-templates/detection/` and Pass 4 uses `-dast -t /root/custom-templates/fuzz/`
+4. All 4 pass results are appended to `allOutput` and passed to `parser.ParseNuclei`
+5. `make up` rebuilds and confirms no Docker build errors
+
+---
+
 ## Key Bugs Fixed
 
 ### Session 1 (2026-03-08)

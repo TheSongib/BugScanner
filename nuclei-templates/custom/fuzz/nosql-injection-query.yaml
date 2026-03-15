@@ -1,0 +1,57 @@
+id: nosql-injection-query-string
+
+info:
+  name: NoSQL Injection via Query String Operator Injection
+  author: bugscanner
+  severity: high
+  description: |
+    Replaces query string parameter values with MongoDB NoSQL operator payloads
+    ($ne, $gt, $regex). An error-based finding indicates the backend is a
+    MongoDB/NoSQL store that is processing (and potentially exposing) the
+    injected operators. Auth bypass via $ne can allow login as any user
+    without a valid password.
+  reference:
+    - https://owasp.org/www-project-web-security-testing-guide/stable/4-Web_Application_Security_Testing/07-Input_Validation_Testing/05.6-Testing_for_NoSQL_Injection
+    - https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/NoSQL%20Injection
+  tags: custom,nosql,injection,mongodb,fuzz
+
+http:
+  - pre-condition:
+      - type: dsl
+        dsl:
+          - 'len(query) > 0'
+
+    fuzzing:
+      - part: query
+        type: replace
+        mode: single
+        fuzz:
+          - '{"$ne":null}'
+          - '{"$gt":""}'
+          - '{"$regex":".*"}'
+          - '{"$ne":"invalid_value_xyz"}'
+
+    matchers-condition: or
+    matchers:
+      # Error-based: app reveals it's processing NoSQL operators
+      - type: word
+        part: body
+        words:
+          - "MongoError"
+          - "MongoServerError"
+          - "Cast to string failed"
+          - "unknown operator"
+          - "$ne is not allowed"
+          - "query selector"
+          - "invalid operator"
+          - "BSON"
+          - "mongoose"
+        condition: or
+        case-insensitive: true
+        name: nosql-error-response
+
+      # Server error indicates unexpected query structure was processed
+      - type: status
+        status:
+          - 500
+        name: server-error-on-injection

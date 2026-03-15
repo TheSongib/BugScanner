@@ -1,0 +1,69 @@
+id: cors-origin-bypass
+
+info:
+  name: CORS Misconfiguration - Arbitrary Origin with Credentials
+  author: bugscanner
+  severity: high
+  description: |
+    The application reflects an arbitrary attacker-controlled Origin in the
+    Access-Control-Allow-Origin header while also setting
+    Access-Control-Allow-Credentials: true. This allows any website to make
+    credentialed cross-origin requests and read the response, enabling
+    account takeover or sensitive data theft.
+  reference:
+    - https://portswigger.net/web-security/cors
+    - https://owasp.org/www-project-web-security-testing-guide/stable/4-Web_Application_Security_Testing/11-Client-Side_Testing/07-Testing_Cross_Origin_Resource_Sharing
+  tags: custom,cors,misconfig,exposure
+
+http:
+  # Test 1: Arbitrary external origin reflection
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+      - "{{BaseURL}}/api/"
+      - "{{BaseURL}}/api/v1/user"
+      - "{{BaseURL}}/api/v1/me"
+      - "{{BaseURL}}/api/me"
+      - "{{BaseURL}}/api/profile"
+      - "{{BaseURL}}/account"
+
+    headers:
+      Origin: "https://evil.cors-test.example.com"
+
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: header
+        words:
+          - "Access-Control-Allow-Origin: https://evil.cors-test.example.com"
+        name: arbitrary-origin-reflected
+
+      - type: word
+        part: header
+        words:
+          - "Access-Control-Allow-Credentials: true"
+        name: credentials-allowed
+
+  # Test 2: Null origin bypass
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+      - "{{BaseURL}}/api/"
+      - "{{BaseURL}}/api/me"
+
+    headers:
+      Origin: "null"
+
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: header
+        words:
+          - "Access-Control-Allow-Origin: null"
+        name: null-origin-accepted
+
+      - type: word
+        part: header
+        words:
+          - "Access-Control-Allow-Credentials: true"
+        name: credentials-with-null-origin

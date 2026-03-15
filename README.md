@@ -10,7 +10,7 @@ When you submit a target domain, the system runs a 5-stage pipeline automaticall
 Target Domain
      │
      ▼
-[1] Asset Discovery      subfinder + amass → finds all subdomains
+[1] Asset Discovery      subfinder + shuffledns → finds all subdomains
      │
      ▼
 [2] Port Scanning        naabu → finds open ports on live hosts
@@ -22,11 +22,20 @@ Target Domain
 [4] Crawling             katana → maps endpoints, JS files, API routes
      │
      ▼
-[5] Vulnerability Scan   nuclei → checks thousands of CVE/misconfiguration templates
+[5] Vulnerability Scan   nuclei — 4-pass scan (see below)
      │
      ▼
 Results stored in PostgreSQL + Discord/Slack alert on findings
 ```
+
+### Vulnerability Scan — 4-Pass Nuclei
+
+| Pass | Mode | Templates | What It Finds |
+|---|---|---|---|
+| 1 | Standard | ~9,000 nuclei http/ templates | CVEs, misconfigs, exposed panels, default credentials, subdomain takeover, headers, SSRF, CORS, XXE, SSTI, JWT issues |
+| 2 | DAST fuzzing | nuclei built-in DAST (54 templates) | SQLi, XSS, LFI, open redirect — actively fuzzes all discovered parameters |
+| 3 | Standard | 15 custom detection templates | GraphQL introspection/CSRF, host header injection, password reset poisoning, CRLF injection, cache poisoning, cache deception, CORS bypass, OAuth redirect_uri bypass, Sentry DSN exposure, prompt injection |
+| 4 | DAST fuzzing | 5 custom fuzzing templates | Blind XSS (OOB), NoSQL injection, SSRF via webhook params (OOB), prototype pollution |
 
 Everything runs concurrently across distributed workers. You can scale to 50 workers in parallel to cover large scopes in minutes.
 
@@ -376,6 +385,44 @@ All settings live in `configs/config.yaml` and can be overridden with environmen
 | `notify.min_severity` | `medium` | Minimum severity to trigger webhook alert |
 
 **Important:** Keep `rate_limit.per_target` reasonable (≤50 rps). Blasting a target with thousands of requests per second is an accidental DoS attack and will get you banned from bug bounty programs.
+
+---
+
+## Custom Nuclei Templates
+
+The scanner ships with 20 custom nuclei templates in `nuclei-templates/custom/`, automatically baked into the worker image at build time. They run in Pass 3 and Pass 4 of the vuln scan.
+
+**Detection templates** (`nuclei-templates/custom/detection/` — Pass 3):
+
+| Template | Detects |
+|---|---|
+| `graphql-introspection.yaml` | GraphQL `__schema` introspection left enabled |
+| `graphql-batch-query.yaml` | GraphQL batch mutations (rate-limit bypass vector) |
+| `graphql-csrf-get.yaml` | GraphQL mutations accepted via GET or `text/plain` POST |
+| `host-header-injection.yaml` | `X-Forwarded-Host` reflected in response body/headers |
+| `password-reset-host-poisoning.yaml` | Password reset uses poisoned Host header (OOB confirmed) |
+| `crlf-injection.yaml` | CRLF sequences in URL params inject raw HTTP headers |
+| `web-cache-poisoning.yaml` | Unkeyed headers reflected in cacheable responses |
+| `web-cache-deception.yaml` | Auth endpoints serve PII when fake `.css`/`.js` suffix appended |
+| `cors-origin-bypass.yaml` | Arbitrary/null origin + `Access-Control-Allow-Credentials: true` |
+| `oauth-redirect-uri-bypass.yaml` | OAuth `redirect_uri` accepts arbitrary external domain |
+| `sentry-dsn-exposure.yaml` | Sentry DSN key in HTML, JS bundles, or config JSON |
+| `prompt-injection-endpoint.yaml` | AI/LLM endpoints disclose system prompt after injection |
+| `open-redirect-path-traversal-bypass.yaml` | `//`, `/%2f/` redirect bypass (OOB confirmed) |
+| `cross-domain-redirect.yaml` | Redirect param accepts arbitrary external URL |
+| `broken-access-control-privilege-params.yaml` | `role:admin`/`isAdmin:true` accepted on update endpoints |
+
+**DAST fuzzing templates** (`nuclei-templates/custom/fuzz/` — Pass 4):
+
+| Template | Detects |
+|---|---|
+| `blind-xss-oob.yaml` | Blind XSS via interactsh OOB in all params + headers |
+| `nosql-injection-query.yaml` | MongoDB `$ne`/`$gt`/`$regex` in query strings |
+| `nosql-injection-json.yaml` | MongoDB `$ne`/`$gt` in JSON POST bodies |
+| `ssrf-webhook-params.yaml` | SSRF via 35+ webhook/URL param names (OOB confirmed) |
+| `prototype-pollution.yaml` | `__proto__`/`constructor.prototype` in query strings + JSON |
+
+To add a new template: create the YAML in the appropriate subfolder, then run `make up`. The Dockerfile automatically COPYs both template directories into the image.
 
 ---
 

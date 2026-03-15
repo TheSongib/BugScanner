@@ -1,0 +1,44 @@
+id: graphql-batch-query-enabled
+
+info:
+  name: GraphQL Query Batching Enabled
+  author: bugscanner
+  severity: low
+  description: |
+    GraphQL query batching is enabled. Batching allows sending multiple queries
+    in a single HTTP request, which can be exploited to bypass rate limits,
+    amplify brute-force attacks, or cause denial-of-service via query bombs.
+  reference:
+    - https://lab.wallarm.com/graphql-batching-attack/
+  tags: custom,graphql,misconfig,dos
+
+http:
+  - method: POST
+    path:
+      - "{{BaseURL}}/graphql"
+      - "{{BaseURL}}/api/graphql"
+      - "{{BaseURL}}/v1/graphql"
+      - "{{BaseURL}}/query"
+      - "{{BaseURL}}/gql"
+
+    headers:
+      Content-Type: application/json
+
+    body: '[{"query":"{__typename}"},{"query":"{__typename}"},{"query":"{__typename}"}]'
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      # Batched response is a JSON array — check for opening bracket
+      - type: regex
+        part: body
+        regex:
+          - '^\s*\['
+
+      - type: word
+        part: body
+        words:
+          - "__typename"

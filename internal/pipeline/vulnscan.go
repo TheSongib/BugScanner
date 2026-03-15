@@ -48,12 +48,16 @@ func (s *VulnScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 	}
 	tmpFile.Close()
 
-	// Two-pass nuclei scan:
+	// Four-pass nuclei scan:
 	// Pass 1 — standard http/ templates: passive checks, CVE detection, exposure, misconfigs.
 	//           Runs ~9000 templates. The -dast flag cannot be combined — it replaces the
 	//           template set rather than extending it.
 	// Pass 2 — DAST mode (-dast): activates the fuzzing engine for SQLi, XSS, LFI etc.
 	//           Only 54 templates but actively fuzzes discovered parameters.
+	// Pass 3 — Custom detection templates: GraphQL, host-header injection, CORS bypass,
+	//           CRLF injection, cache poisoning, prompt injection, open redirects, etc.
+	// Pass 4 — Custom DAST fuzzing templates: blind XSS OOB, NoSQL injection, SSRF via
+	//           webhook params, prototype pollution.
 	commonArgs := []string{
 		"-list", tmpFile.Name(),
 		"-jsonl",
@@ -66,6 +70,8 @@ func (s *VulnScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 
 	passiveArgs := append([]string{"-t", "/root/nuclei-templates/http/"}, commonArgs...)
 	dastArgs := append([]string{"-dast"}, commonArgs...)
+	customArgs := append([]string{"-t", "/root/custom-templates/detection/"}, commonArgs...)
+	customDastArgs := append([]string{"-dast", "-t", "/root/custom-templates/fuzz/"}, commonArgs...)
 
 	var allOutput []byte
 
@@ -85,6 +91,24 @@ func (s *VulnScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 	} else {
 		slog.Info("nuclei DAST pass complete", "bytes", len(dastResult.Stdout))
 		allOutput = append(allOutput, dastResult.Stdout...)
+	}
+
+	slog.Info("nuclei pass 3: custom detection templates", "scan_id", job.ScanID)
+	customResult, err := s.deps.Runner.RunWithTimeout(ctx, s.deps.Config.Tools.Nuclei, customArgs, nil, 10*time.Minute)
+	if err != nil {
+		slog.Warn("nuclei custom detection pass failed", "error", err)
+	} else {
+		slog.Info("nuclei custom detection pass complete", "bytes", len(customResult.Stdout))
+		allOutput = append(allOutput, customResult.Stdout...)
+	}
+
+	slog.Info("nuclei pass 4: custom DAST fuzzing templates", "scan_id", job.ScanID)
+	customDastResult, err := s.deps.Runner.RunWithTimeout(ctx, s.deps.Config.Tools.Nuclei, customDastArgs, nil, 12*time.Minute)
+	if err != nil {
+		slog.Warn("nuclei custom DAST pass failed", "error", err)
+	} else {
+		slog.Info("nuclei custom DAST pass complete", "bytes", len(customDastResult.Stdout))
+		allOutput = append(allOutput, customDastResult.Stdout...)
 	}
 
 	if len(allOutput) > 0 {

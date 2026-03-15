@@ -1,0 +1,50 @@
+id: open-redirect-path-traversal-bypass
+
+info:
+  name: Open Redirect via Path Traversal Bypass
+  author: bugscanner
+  severity: medium
+  description: |
+    Tests for open redirect vulnerabilities that bypass blacklist filters using
+    path traversal sequences (/..//, //) and URL encoding variants.
+    OOB confirmation via interactsh callback.
+  tags: custom,redirect,open-redirect,bypass,interactsh,oast
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/?redirect=//{{interactsh-url}}"
+      - "{{BaseURL}}/?redirect=/%2f%2f{{interactsh-url}}"
+      - "{{BaseURL}}/?redirect=/{{interactsh-url}}/%2f%2e%2e"
+      - "{{BaseURL}}/?redirect=https://{{interactsh-url}}"
+      - "{{BaseURL}}/?next=//{{interactsh-url}}"
+      - "{{BaseURL}}/?url=//{{interactsh-url}}"
+      - "{{BaseURL}}/?return=//{{interactsh-url}}"
+      - "{{BaseURL}}/?returnTo=//{{interactsh-url}}"
+      - "{{BaseURL}}/?continue=//{{interactsh-url}}"
+      - "{{BaseURL}}/?goto=//{{interactsh-url}}"
+      - "{{BaseURL}}/?dest=//{{interactsh-url}}"
+      - "{{BaseURL}}/?target=//{{interactsh-url}}"
+      - "{{BaseURL}}/?redir=//{{interactsh-url}}"
+      - "{{BaseURL}}/?r=//{{interactsh-url}}"
+      - "{{BaseURL}}/?ref=//{{interactsh-url}}"
+
+    matchers-condition: or
+    matchers:
+      - type: word
+        part: interactsh_protocol
+        words:
+          - "http"
+        name: oob-callback-confirmed
+
+      - type: word
+        part: header
+        words:
+          - "{{interactsh-url}}"
+        name: location-header-reflection
+
+      - type: regex
+        part: header
+        regex:
+          - "(?i)Location:.*{{interactsh-url}}"
+        name: location-header-regex

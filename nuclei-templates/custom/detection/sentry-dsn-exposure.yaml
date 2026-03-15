@@ -1,0 +1,74 @@
+id: sentry-dsn-exposure
+
+info:
+  name: Sentry DSN Exposed in Client-Side Code
+  author: bugscanner
+  severity: medium
+  description: |
+    A Sentry DSN (Data Source Name) is exposed in publicly accessible
+    JavaScript files or HTML pages. The DSN contains the Sentry project key and
+    allows anyone to submit arbitrary events to the Sentry project, read
+    existing error reports (which may contain PII, stack traces, environment
+    variables, session data), and enumerate internal infrastructure details.
+    HackerOne paid $750 for this class (#697512).
+  reference:
+    - https://hackerone.com/reports/697512
+    - https://docs.sentry.io/product/sentry-basics/dsn-explainer/
+  tags: custom,sentry,exposure,information-disclosure,misconfig
+
+http:
+  # Check main page and common JS bundle paths for Sentry DSN patterns
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+      - "{{BaseURL}}/index.html"
+      - "{{BaseURL}}/app.js"
+      - "{{BaseURL}}/bundle.js"
+      - "{{BaseURL}}/main.js"
+      - "{{BaseURL}}/static/js/main.js"
+      - "{{BaseURL}}/assets/js/app.js"
+      - "{{BaseURL}}/js/app.js"
+      - "{{BaseURL}}/dist/bundle.js"
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      # Sentry DSN format: https://<key>@<host>/sentry/<project-id>
+      # Or: https://<key>@sentry.io/<project-id>
+      - type: regex
+        part: body
+        regex:
+          - 'https://[0-9a-f]{32}@[a-z0-9.-]+/[0-9]+'
+          - 'dsn["\s]*:["\s]*"https://[0-9a-f]{32}@'
+          - 'SENTRY_DSN["\s]*=["\s]*"https://'
+          - '"dsn"\s*:\s*"https://[a-z0-9]+@[a-z0-9.-]+'
+          - "Sentry\.init\s*\(\s*\{[^}]*dsn"
+        condition: or
+
+  # Also check common API config endpoints that might expose Sentry config
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/config"
+      - "{{BaseURL}}/api/v1/config"
+      - "{{BaseURL}}/config.json"
+      - "{{BaseURL}}/app-config.json"
+      - "{{BaseURL}}/static/config.json"
+      - "{{BaseURL}}/settings.json"
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: regex
+        part: body
+        regex:
+          - '"dsn"\s*:\s*"https://[0-9a-f]{32}@'
+          - '"sentryDsn"\s*:\s*"https://'
+          - '"sentry_dsn"\s*:\s*"https://'
+          - 'https://[0-9a-f]{32}@[a-z0-9.-]+\.sentry\.io/'
+        condition: or

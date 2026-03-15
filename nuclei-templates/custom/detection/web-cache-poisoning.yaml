@@ -1,0 +1,50 @@
+id: web-cache-poisoning-unkeyed-header
+
+info:
+  name: Web Cache Poisoning via Unkeyed Header Reflection
+  author: bugscanner
+  severity: medium
+  description: |
+    Unkeyed HTTP headers (X-Forwarded-Host, X-Original-URL, X-Rewrite-URL)
+    are reflected in the response body or headers without being part of the
+    cache key. If this response is cached, subsequent users will receive
+    the poisoned content, enabling stored XSS or forced redirects at scale.
+  reference:
+    - https://portswigger.net/research/practical-web-cache-poisoning
+  tags: custom,cache-poisoning,unkeyed-header,misconfig
+
+http:
+  # Probe with X-Forwarded-Host
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+      - "{{BaseURL}}/index"
+      - "{{BaseURL}}/home"
+
+    headers:
+      X-Forwarded-Host: "cache-poison-test.example.com"
+      Cache-Control: "no-cache"
+
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "cache-poison-test.example.com"
+        name: forwarded-host-reflected
+
+  # Probe with X-Original-URL path override
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+
+    headers:
+      X-Original-URL: "/cache-poison-path-test"
+      X-Rewrite-URL: "/cache-poison-path-test"
+      Cache-Control: "no-cache"
+
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "cache-poison-path-test"
+        name: original-url-reflected

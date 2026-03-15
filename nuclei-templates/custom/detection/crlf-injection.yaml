@@ -1,0 +1,40 @@
+id: crlf-injection
+
+info:
+  name: CRLF Injection / HTTP Response Splitting
+  author: bugscanner
+  severity: medium
+  description: |
+    CRLF (%0d%0a) sequences injected into URL paths or common redirect
+    parameters are reflected as actual HTTP headers in the response,
+    indicating HTTP response splitting. Can be chained to inject arbitrary
+    headers, perform XSS via Set-Cookie, or execute cache poisoning attacks.
+  reference:
+    - https://owasp.org/www-community/attacks/HTTP_Response_Splitting
+  tags: custom,crlf,injection,response-splitting,header-injection
+
+http:
+  - method: GET
+    path:
+      # CRLF in path
+      - "{{BaseURL}}/%0d%0aX-CRLF-Injected:%20crlf-test-header"
+      - "{{BaseURL}}/%0d%0aSet-Cookie:%20crlf-test=injected"
+      # CRLF in common redirect parameters
+      - "{{BaseURL}}/?redirect=%0d%0aX-CRLF-Injected:%20crlf-test-header"
+      - "{{BaseURL}}/?url=%0d%0aX-CRLF-Injected:%20crlf-test-header"
+      - "{{BaseURL}}/?next=%0d%0aX-CRLF-Injected:%20crlf-test-header"
+      - "{{BaseURL}}/?return=%0d%0aX-CRLF-Injected:%20crlf-test-header"
+      # Double-encoded CRLF
+      - "{{BaseURL}}/?redirect=%250d%250aX-CRLF-Injected:%20crlf-test-header"
+      - "{{BaseURL}}/?url=%250d%250aX-CRLF-Injected:%20crlf-test-header"
+
+    matchers-condition: or
+    matchers:
+      - type: word
+        part: header
+        words:
+          - "X-CRLF-Injected"
+          - "crlf-test-header"
+          - "crlf-test=injected"
+        condition: or
+        name: injected-header-in-response

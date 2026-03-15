@@ -17,7 +17,7 @@ info:
   classification:
     cwe-id: CWE-601
     cvss-metrics: CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N
-    cvss-score: 5.1
+    cvss-score: 6.1
   tags: open-redirect,redirect,bypass,traversal,fuzzing,generic
 
 http:

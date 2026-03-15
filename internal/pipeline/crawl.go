@@ -79,8 +79,15 @@ func (s *CrawlStage) Run(ctx context.Context, job broker.Job) (int, error) {
 			crawledURLs = append(crawledURLs, cr.URL)
 		}
 
+		// Parse HTML forms from each crawled page and build synthetic katana-format
+		// JSONL entries for nuclei DAST POST fuzzing. Katana's -form-extraction flag
+		// only works in headless mode; this approach works without a browser.
+		formTargets := extractFormsFromPages(crawledURLs)
+		slog.Info("crawl extracted form targets", "count", len(formTargets))
+
 		err = s.deps.Broker.PublishToStage(ctx, broker.QueueVulnScan, job.ScanID, broker.VulnScanPayload{
-			URLs: crawledURLs,
+			URLs:        crawledURLs,
+			FormTargets: formTargets,
 		})
 		if err != nil {
 			return len(crawlResults), fmt.Errorf("publish vulnscan job: %w", err)
@@ -88,4 +95,13 @@ func (s *CrawlStage) Run(ctx context.Context, job broker.Job) (int, error) {
 	}
 
 	return len(crawlResults), nil
+}
+
+// extractFormsFromPages fetches each crawled URL, parses HTML forms, and returns
+// synthetic katana-format JSONL entries for POST forms. Nuclei DAST reads these
+// via -im jsonl to discover form field names and fuzz POST body parameters.
+// This approach works without headless Chrome, which katana's -form-extraction
+// requires to actually emit POST entries.
+func extractFormsFromPages(urls []string) []string {
+	return parseFormsFromURLs(urls)
 }

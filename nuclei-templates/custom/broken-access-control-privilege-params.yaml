@@ -1,0 +1,113 @@
+id: broken-access-control-privilege-params
+
+info:
+  name: Broken Access Control - Privilege Parameter Escalation
+  author: bugscanner
+  severity: medium
+  description: |
+    Detects potential broken access control (BAC) vulnerabilities where privilege-related
+    parameters (role, plan, visibility, tier, etc.) can be set to elevated values via the
+    API without server-side enforcement. The template fuzzes common privilege field names
+    with escalation values and confirms exploitation by checking that the escalated value
+    is reflected back in the response body — a strong indicator the server accepted and
+    persisted the unauthorized change.
+
+    Pattern based on HackerOne #3370430 (Lovable.dev subscription tier bypass via
+    visibility parameter in project creation endpoint).
+  reference:
+    - https://hackerone.com/reports/3370430
+    - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+    - https://cwe.mitre.org/data/definitions/284.html
+  classification:
+    cwe-id: CWE-284
+    cvss-metrics: CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:H/A:N
+    cvss-score: 7.1
+  tags: broken-access-control,authorization,privilege-escalation,bac,fuzzing,generic
+
+http:
+  - fuzzing:
+      - part: body
+        type: replace
+        mode: single
+        # Privilege-related field names commonly found in API request bodies.
+        # These control access level, subscription tier, or organizational role.
+        keys:
+          - role
+          - roles
+          - user_role
+          - userRole
+          - visibility
+          - plan
+          - plan_id
+          - planId
+          - tier
+          - subscription
+          - subscription_type
+          - subscriptionType
+          - permission
+          - permissions
+          - access_level
+          - accessLevel
+          - account_type
+          - accountType
+          - membership
+          - membership_type
+          - group
+          - groups
+          - privilege
+          - privileges
+          - scope
+          - type
+        # Common privilege-escalation values across SaaS/API platforms.
+        # Covers generic admin values, subscription tier names, and visibility levels.
+        fuzz:
+          - "admin"
+          - "administrator"
+          - "superadmin"
+          - "super_admin"
+          - "owner"
+          - "root"
+          - "enterprise"
+          - "Enterprise"
+          - "premium"
+          - "Premium"
+          - "pro"
+          - "Pro"
+          - "unlimited"
+          - "Unlimited"
+          - "Personal"
+          - "Workspace"
+          - "public"
+          - "internal"
+          - "global"
+          - "superuser"
+          - "manager"
+          - "moderator"
+          - "staff"
+
+    stop-at-first-match: true
+
+    matchers-condition: and
+    matchers:
+      # Response must be a success — server accepted the request
+      - type: status
+        status:
+          - 200
+          - 201
+          - 204
+
+      # The escalated value must be reflected in the response body, confirming the
+      # server accepted and stored it rather than silently ignoring it.
+      # This dramatically reduces false positives vs. a plain 200 status match.
+      - type: regex
+        part: body
+        regex:
+          - "\"(role|roles|user_role|visibility|plan|tier|subscription|permission|access_level|account_type|membership|privilege|scope|type)\"\\s*:\\s*\"(admin|administrator|superadmin|super_admin|owner|root|enterprise|Enterprise|premium|Premium|pro|Pro|unlimited|Unlimited|Personal|Workspace|public|internal|global|superuser|manager|moderator|staff)\""
+
+    extractors:
+      - type: regex
+        part: body
+        name: accepted_privilege_value
+        group: 0
+        regex:
+          - "\"(role|roles|user_role|visibility|plan|tier|subscription|permission|access_level|account_type|membership|privilege|scope|type)\"\\s*:\\s*\"[^\"]+\""

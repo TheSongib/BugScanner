@@ -41,7 +41,8 @@ type CrawlPayload struct {
 
 // VulnScanPayload is the payload for the vulnerability scanning stage.
 type VulnScanPayload struct {
-	URLs       []string `json:"urls"`
+	URLs         []string `json:"urls"`
+	FormTargets  []string `json:"form_targets,omitempty"`  // raw katana JSONL lines for POST form fuzzing
 	Technologies []string `json:"technologies,omitempty"` // for template selection
 }
 

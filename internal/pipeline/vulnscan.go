@@ -48,12 +48,18 @@ func (s *VulnScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 	}
 	tmpFile.Close()
 
-	// Two-pass nuclei scan:
-	// Pass 1 — standard http/ templates: passive checks, CVE detection, exposure, misconfigs.
-	//           Runs ~9000 templates. The -dast flag cannot be combined — it replaces the
-	//           template set rather than extending it.
-	// Pass 2 — DAST mode (-dast): activates the fuzzing engine for SQLi, XSS, LFI etc.
-	//           Only 54 templates but actively fuzzes discovered parameters.
+	// Four-pass nuclei scan:
+	// Pass 1 — Passive: exposures, misconfigurations, exposed panels (~700 templates, 8 min).
+	//           Covers backup files, git exposure, open redirects, server misconfigs,
+	//           and exposed admin panels (Kubernetes, Grafana, Jenkins, etc.).
+	// Pass 2 — DAST fuzzing (-dast): SQLi, XSS, LFI, open redirect bypass, BAC parameter
+	//           escalation, and other injection classes via active parameter fuzzing.
+	// Pass 3 — POST form DAST: same fuzzing engine applied to HTML form POST bodies,
+	//           catching SQLi/XSS in login forms, search boxes, profile pages, etc.
+	// Pass 4 — CVE scan: critical + high severity CVE templates only (~1500 templates, 20 min).
+	//           Targets known exploitable vulnerabilities (RCE, auth bypass, SSRF, SQLi CVEs).
+	//           Kept as a separate pass with its own timeout and severity filter to avoid
+	//           blowing up Pass 1 timing by running all 9000+ templates together.
 	commonArgs := []string{
 		"-list", tmpFile.Name(),
 		"-jsonl",
@@ -64,13 +70,38 @@ func (s *VulnScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 		"-concurrency", "10",
 	}
 
-	passiveArgs := append([]string{"-t", "/root/nuclei-templates/http/"}, commonArgs...)
-	dastArgs := append([]string{"-dast"}, commonArgs...)
+	// Pass 1 targets: exposures + misconfigurations + exposed panels.
+	// Running the full http/ tree (9000+ templates) consistently exceeds the timeout.
+	// These directories cover backup files, source disclosure, phpinfo, git exposure,
+	// open redirects, server misconfigs, and exposed admin panels (Kubernetes dashboard,
+	// ingress-nginx, Grafana, Jenkins, etc.) — the high-value passive findings for bug bounties.
+	passiveArgs := append([]string{
+		"-t", "/root/nuclei-templates/http/exposures/",
+		"-t", "/root/nuclei-templates/http/misconfiguration/",
+		"-t", "/root/nuclei-templates/http/exposed-panels/",
+	}, commonArgs...)
+	// Include custom templates alongside built-in DAST templates.
+	// /root/custom-templates/ is populated at image build time from nuclei-templates/custom/.
+	dastArgs := append([]string{"-dast", "-t", "/root/custom-templates/"}, commonArgs...)
+
+	// Pass 4 — CVE scan: critical + high severity only.
+	// Built independently of commonArgs so we can override -severity without duplicating flags.
+	// 20-minute timeout accommodates ~1500 templates without rushing the scan.
+	cveArgs := []string{
+		"-t", "/root/nuclei-templates/http/cves/",
+		"-list", tmpFile.Name(),
+		"-jsonl",
+		"-severity", "critical,high",
+		"-silent",
+		"-rate-limit", "50",
+		"-bulk-size", "25",
+		"-concurrency", "10",
+	}
 
 	var allOutput []byte
 
-	slog.Info("nuclei pass 1: passive/http templates", "scan_id", job.ScanID)
-	passiveResult, err := s.deps.Runner.RunWithTimeout(ctx, s.deps.Config.Tools.Nuclei, passiveArgs, nil, 20*time.Minute)
+	slog.Info("nuclei pass 1: exposures + misconfiguration templates", "scan_id", job.ScanID)
+	passiveResult, err := s.deps.Runner.RunWithTimeout(ctx, s.deps.Config.Tools.Nuclei, passiveArgs, nil, 8*time.Minute)
 	if err != nil {
 		slog.Warn("nuclei passive pass failed", "error", err)
 	} else {
@@ -85,6 +116,65 @@ func (s *VulnScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 	} else {
 		slog.Info("nuclei DAST pass complete", "bytes", len(dastResult.Stdout))
 		allOutput = append(allOutput, dastResult.Stdout...)
+	}
+
+	// Pass 3 — POST form fuzzing.
+	// Uses katana's raw form JSONL lines as input (-im jsonl) so nuclei can
+	// parse form field names and fuzz POST body parameters. This catches
+	// SQLi/XSS in login forms, search forms, profile pages, etc. that are
+	// invisible to plain URL-based fuzzing.
+	if len(payload.FormTargets) > 0 {
+		formFile, err := os.CreateTemp("", "nuclei-forms-*.jsonl")
+		if err != nil {
+			slog.Warn("could not create form targets file, skipping POST fuzzing", "error", err)
+		} else {
+			defer os.Remove(formFile.Name())
+			for _, line := range payload.FormTargets {
+				if _, err := formFile.WriteString(line + "\n"); err != nil {
+					slog.Warn("failed to write form target to temp file; POST fuzzing input may be incomplete", "error", err)
+					break
+				}
+			}
+			formFile.Close()
+
+			// Reuse common nuclei flags but drop any existing -list argument so we can
+			// safely substitute the form targets file, without depending on the
+			// positional layout of commonArgs.
+			withoutList := func(args []string) []string {
+				filtered := make([]string, 0, len(args))
+				for i := 0; i < len(args); i++ {
+					if args[i] == "-list" {
+						// Skip "-list" and its value (if present).
+						if i+1 < len(args) {
+							i++
+						}
+						continue
+					}
+					filtered = append(filtered, args[i])
+				}
+				return filtered
+			}
+
+			formArgs := append([]string{"-dast", "-im", "jsonl", "-list", formFile.Name()},
+				withoutList(commonArgs)...) // reuse rate/concurrency flags but skip the URL -list
+			slog.Info("nuclei pass 3: POST form DAST fuzzing", "forms", len(payload.FormTargets), "scan_id", job.ScanID)
+			formResult, err := s.deps.Runner.RunWithTimeout(ctx, s.deps.Config.Tools.Nuclei, formArgs, nil, 10*time.Minute)
+			if err != nil {
+				slog.Warn("nuclei form DAST pass failed", "error", err)
+			} else {
+				slog.Info("nuclei form DAST pass complete", "bytes", len(formResult.Stdout))
+				allOutput = append(allOutput, formResult.Stdout...)
+			}
+		}
+	}
+
+	slog.Info("nuclei pass 4: CVE scan (critical + high)", "scan_id", job.ScanID)
+	cveResult, err := s.deps.Runner.RunWithTimeout(ctx, s.deps.Config.Tools.Nuclei, cveArgs, nil, 20*time.Minute)
+	if err != nil {
+		slog.Warn("nuclei CVE pass failed", "error", err)
+	} else {
+		slog.Info("nuclei CVE pass complete", "bytes", len(cveResult.Stdout))
+		allOutput = append(allOutput, cveResult.Stdout...)
 	}
 
 	if len(allOutput) > 0 {

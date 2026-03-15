@@ -10,19 +10,23 @@ When you submit a target domain, the system runs a 5-stage pipeline automaticall
 Target Domain
      │
      ▼
-[1] Asset Discovery      subfinder + amass → finds all subdomains
+[1] Asset Discovery      subfinder + shuffledns → finds all subdomains
      │
      ▼
-[2] Port Scanning        naabu → finds open ports on live hosts
+[2] Port Scanning        naabu → finds open ports on live hosts (TCP connect scan)
      │
      ▼
 [3] HTTP Probing         httpx → identifies live web services + tech stack
      │
      ▼
-[4] Crawling             katana → maps endpoints, JS files, API routes
+[4] Crawling             katana → maps endpoints, JS files, API routes, HTML forms
      │
      ▼
-[5] Vulnerability Scan   nuclei → checks thousands of CVE/misconfiguration templates
+[5] Vulnerability Scan   nuclei → 4-pass scan:
+                           Pass 1: exposures + misconfigs + exposed panels
+                           Pass 2: DAST fuzzing (GET params — SQLi, XSS, redirects)
+                           Pass 3: POST form DAST (login forms, search boxes, etc.)
+                           Pass 4: CVE scan (critical + high severity only)
      │
      ▼
 Results stored in PostgreSQL + Discord/Slack alert on findings
@@ -451,7 +455,18 @@ docker exec -it deployments-postgres-1 psql -U scanner -d bugscanner
 Then run standard SQL: `SELECT * FROM scans;`, `SELECT severity, count(*) FROM vulnerabilities GROUP BY severity;`
 
 **Scan terminates at port scan with 0 ports found:**
-The test server (`testphp.vulnweb.com`) or target may be temporarily unreachable. Wait a minute and retry.
+The target may be temporarily unreachable, or the target has no open web ports. Check worker logs for details. The scanner uses TCP connect scan which works in all Docker environments.
 
 **Scan reaches httpx but finds 0 live services:**
 This is usually a transient network issue. The port scanner runs web-ports-only to avoid disrupting Docker's connection tracking. Retry the scan.
+
+**shuffledns fails with "could not find massdns binary":**
+Your worker image is out of date. Rebuild: `docker compose -f deployments/docker-compose.yml build worker && docker compose -f deployments/docker-compose.yml up -d worker`
+
+**Good test target for verifying the scanner works:**
+```bash
+curl -X POST http://localhost:8080/api/v1/scans \
+  -H "Content-Type: application/json" \
+  -d '{"target": "scanme.nmap.org"}'
+```
+`scanme.nmap.org` is Nmap's official test server (explicitly permitted for scanning). Expect ~6 minutes to complete. Typical findings: Apache mod_negotiation listing (low), missing security headers (info).

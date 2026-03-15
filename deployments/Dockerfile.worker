@@ -1,5 +1,5 @@
 # Stage 1: Build the worker Go binary
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24-alpine AS builder
 RUN apk add --no-cache git
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -9,10 +9,14 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /worker ./cmd/worker
 
 # Stage 2: Pull binaries from official Docker images
 FROM projectdiscovery/subfinder:latest AS subfinder
+FROM projectdiscovery/shuffledns:latest AS shuffledns
 FROM projectdiscovery/naabu:latest AS naabu
 FROM projectdiscovery/httpx:latest AS httpx
 FROM projectdiscovery/katana:latest AS katana
 FROM projectdiscovery/nuclei:latest AS nuclei
+# Note: amass was donated to OWASP and their ghcr.io image requires auth.
+# The discovery stage handles a missing amass binary gracefully (logs WARN, continues).
+# Subfinder + shuffledns provides equivalent passive DNS coverage for bug bounty use.
 
 # Stage 3: Final runtime image
 FROM alpine:3.19
@@ -24,20 +28,33 @@ RUN apk add --no-cache \
     bind-tools \
     bash
 
-# Copy binaries from official ProjectDiscovery images
-COPY --from=subfinder /usr/local/bin/subfinder /usr/local/bin/subfinder
-COPY --from=naabu     /usr/local/bin/naabu     /usr/local/bin/naabu
-COPY --from=httpx     /usr/local/bin/httpx     /usr/local/bin/httpx
-COPY --from=katana    /usr/local/bin/katana    /usr/local/bin/katana
-COPY --from=nuclei    /usr/local/bin/nuclei    /usr/local/bin/nuclei
+# Copy binaries from official images
+COPY --from=subfinder  /usr/local/bin/subfinder  /usr/local/bin/subfinder
+COPY --from=shuffledns /usr/bin/shuffledns       /usr/local/bin/shuffledns
+COPY --from=shuffledns /usr/bin/massdns          /usr/local/bin/massdns
+COPY --from=naabu      /usr/local/bin/naabu      /usr/local/bin/naabu
+COPY --from=httpx      /usr/local/bin/httpx      /usr/local/bin/httpx
+COPY --from=katana     /usr/local/bin/katana     /usr/local/bin/katana
+COPY --from=nuclei     /usr/local/bin/nuclei     /usr/local/bin/nuclei
 
 # Download nuclei templates at build time so they're baked into the image.
-# The volume mount in docker-compose allows runtime updates without rebuilding.
 ENV HOME=/root
 RUN nuclei -update-templates
+
+# Download wordlists required by shuffledns.
+# Without these, shuffledns silently fails and subdomain brute-forcing is skipped entirely.
+# Uses a compact 5k-entry wordlist for speed; swap for a larger list if deeper coverage is needed.
+RUN mkdir -p /usr/share/wordlists && \
+    wget -q -O /usr/share/wordlists/dns.txt \
+      "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-5000.txt" && \
+    wget -q -O /usr/share/wordlists/resolvers.txt \
+      "https://raw.githubusercontent.com/trickest/resolvers/main/resolvers.txt"
 
 # Copy worker binary and config
 COPY --from=builder /worker /usr/local/bin/worker
 COPY configs/config.yaml /etc/bugscanner/config.yaml
+
+# Copy custom Nuclei templates into the image
+COPY nuclei-templates/custom/ /root/custom-templates/
 
 ENTRYPOINT ["worker"]

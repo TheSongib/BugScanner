@@ -63,7 +63,10 @@ func ParseNuclei(data []byte) ([]VulnFinding, error) {
 	seen := make(map[string]bool)
 
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+	// 10 MB buffer — nuclei findings with large extracted payloads or many results
+	// can easily exceed the default 64 KB limit and the previous 1 MB cap, causing
+	// scanner.Scan() to return false mid-output and silently drop remaining findings.
+	scanner.Buffer(make([]byte, 0, 10*1024*1024), 10*1024*1024)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

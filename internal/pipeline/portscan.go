@@ -37,9 +37,15 @@ func (s *PortScanStage) Run(ctx context.Context, job broker.Job) (int, error) {
 	// Scan only common web ports to minimise conntrack table pressure in Docker.
 	// Top-1000 creates ~1000 conntrack entries that take ~60s to expire and break
 	// subsequent httpx probes. Web-focused port list covers all practical HTTP targets.
+	//
+	// -s connect: use TCP connect scan instead of SYN scan. SYN scan requires
+	// NET_RAW capability (raw sockets) which Docker containers don't have by default,
+	// causing naabu to silently return 0 results. Connect scan is reliable in all
+	// container environments at the cost of being slightly more detectable.
 	result, err := s.deps.Runner.Run(ctx, s.deps.Config.Tools.Naabu, []string{
 		"-list", "/dev/stdin",
 		"-json",
+		"-s", "connect",
 		"-p", "80,443,8080,8443,8000,8888,3000,5000,4000,9000,9090,9443,4443,8008,8181,8800,7080,7443,6443,3001",
 		"-rate", "300",
 		"-silent",

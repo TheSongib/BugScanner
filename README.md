@@ -1,4 +1,5 @@
 # Bug Bounty Scanner
+Disclaimer - Built with significant Claude Code usage
 
 A distributed, automated reconnaissance and vulnerability scanning platform for bug bounty hunting. Built in Go with a pipeline architecture that chains together the industry-standard ProjectDiscovery tool suite.
 
